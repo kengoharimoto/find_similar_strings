@@ -1,0 +1,2 @@
+tqdm>=4.0
+rapidfuzz>=3.0  # optional — only needed with --use-rapidfuzz
