@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>find_similar_strings — command builder</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #0f1117;
+    --surface:   #1a1d27;
+    --border:    #2e3244;
+    --accent:    #6c8ef7;
+    --accent-dk: #4f6be0;
+    --text:      #dde1f0;
+    --muted:     #7b82a0;
+    --green:     #4caf82;
+    --red:       #e05c5c;
+    --radius:    8px;
+    --mono:      "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 2rem 1rem;
+  }
+
+  h1 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    letter-spacing: -.02em;
+    margin-bottom: .25rem;
+  }
+
+  .subtitle {
+    font-size: .85rem;
+    color: var(--muted);
+    margin-bottom: 2rem;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    margin-bottom: 1.25rem;
+    max-width: 720px;
+  }
+
+  .card-title {
+    font-size: .7rem;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: var(--muted);
+    margin-bottom: 1.1rem;
+  }
+
+  .field { margin-bottom: 1rem; }
+  .field:last-child { margin-bottom: 0; }
+
+  .field-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+
+  label {
+    display: block;
+    font-size: .8rem;
+    font-weight: 500;
+    color: var(--muted);
+    margin-bottom: .35rem;
+  }
+
+  label .flag {
+    font-family: var(--mono);
+    font-size: .75rem;
+    color: var(--accent);
+  }
+
+  label .default {
+    font-size: .72rem;
+    color: #555a72;
+    margin-left: .3rem;
+  }
+
+  input[type="text"],
+  input[type="number"] {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text);
+    font-size: .875rem;
+    padding: .45rem .65rem;
+    outline: none;
+    transition: border-color .15s;
+  }
+
+  input[type="text"]:focus,
+  input[type="number"]:focus {
+    border-color: var(--accent);
+  }
+
+  input[type="text"]::placeholder,
+  input[type="number"]::placeholder {
+    color: #3d4160;
+  }
+
+  /* Checkbox toggle */
+  .toggle-field {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .toggle-field input[type="checkbox"] { display: none; }
+
+  .toggle-track {
+    width: 36px;
+    height: 20px;
+    background: var(--border);
+    border-radius: 99px;
+    position: relative;
+    transition: background .2s;
+    flex-shrink: 0;
+  }
+
+  .toggle-track::after {
+    content: "";
+    position: absolute;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: #fff;
+    top: 3px; left: 3px;
+    transition: transform .2s;
+  }
+
+  input[type="checkbox"]:checked + .toggle-track {
+    background: var(--accent);
+  }
+
+  input[type="checkbox"]:checked + .toggle-track::after {
+    transform: translateX(16px);
+  }
+
+  .toggle-label {
+    font-size: .85rem;
+    color: var(--text);
+  }
+
+  .toggle-flag {
+    font-family: var(--mono);
+    font-size: .78rem;
+    color: var(--accent);
+    margin-left: .25rem;
+  }
+
+  .toggle-desc {
+    font-size: .75rem;
+    color: var(--muted);
+    margin-top: .15rem;
+  }
+
+  /* Output box */
+  .output-card {
+    position: sticky;
+    bottom: 1.5rem;
+    max-width: 720px;
+  }
+
+  .cmd-wrap {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: .75rem 1rem;
+    font-family: var(--mono);
+    font-size: .82rem;
+    color: #c9d0f0;
+    word-break: break-all;
+    white-space: pre-wrap;
+    min-height: 3rem;
+    line-height: 1.6;
+  }
+
+  .cmd-wrap .part-script  { color: var(--green); }
+  .cmd-wrap .part-file    { color: #e8b86d; }
+  .cmd-wrap .part-flag    { color: var(--accent); }
+  .cmd-wrap .part-value   { color: var(--text); }
+
+  .btn-row {
+    display: flex;
+    gap: .6rem;
+    margin-top: .75rem;
+  }
+
+  button {
+    padding: .4rem .9rem;
+    border: none;
+    border-radius: 5px;
+    font-size: .8rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background .15s, transform .1s;
+  }
+
+  button:active { transform: scale(.97); }
+
+  .btn-copy {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .btn-copy:hover { background: var(--accent-dk); }
+
+  .btn-reset {
+    background: var(--border);
+    color: var(--muted);
+  }
+
+  .btn-reset:hover { background: #3a3f58; color: var(--text); }
+
+  .copy-status {
+    font-size: .78rem;
+    color: var(--green);
+    align-self: center;
+    opacity: 0;
+    transition: opacity .3s;
+  }
+
+  .copy-status.show { opacity: 1; }
+
+  /* Validation */
+  input.invalid { border-color: var(--red) !important; }
+
+  .hint {
+    font-size: .72rem;
+    color: var(--muted);
+    margin-top: .3rem;
+  }
+
+  hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 1rem 0;
+  }
+</style>
+</head>
+<body>
+
+<h1>find_similar_strings</h1>
+<p class="subtitle">Compose your command line — copy and paste into a terminal.</p>
+
+<!-- Required -->
+<div class="card">
+  <div class="card-title">Input files (required)</div>
+
+  <div class="field">
+    <label>File 1 <span class="flag">file1</span></label>
+    <input type="text" id="file1" placeholder="/path/to/first_file.txt">
+  </div>
+
+  <div class="field">
+    <label>File 2 <span class="flag">file2</span></label>
+    <input type="text" id="file2" placeholder="/path/to/second_file.txt">
+  </div>
+
+  <div class="field">
+    <label>Output CSV <span class="flag">-o</span> <span class="default">optional — leave blank to print to stdout</span></label>
+    <input type="text" id="output" placeholder="/path/to/output.csv">
+  </div>
+</div>
+
+<!-- Matching -->
+<div class="card">
+  <div class="card-title">Matching options</div>
+
+  <div class="field-row">
+    <div class="field">
+      <label>Min length <span class="flag">-n / --min-len</span> <span class="default">default 100</span></label>
+      <input type="number" id="min_len" min="1" placeholder="100">
+    </div>
+    <div class="field">
+      <label>Max length <span class="flag">--max-len</span> <span class="default">default 0 = no limit</span></label>
+      <input type="number" id="max_len" min="0" placeholder="0">
+    </div>
+  </div>
+
+  <div class="field">
+    <label>Similarity threshold <span class="flag">-t / --threshold</span> <span class="default">default 0.8 — range 0–1</span></label>
+    <input type="number" id="threshold" min="0.01" max="1" step="0.01" placeholder="0.8">
+    <div class="hint" id="threshold-hint"></div>
+  </div>
+
+  <hr>
+
+  <div class="field">
+    <label class="toggle-field" for="use_rapidfuzz">
+      <input type="checkbox" id="use_rapidfuzz">
+      <span class="toggle-track"></span>
+      <span>
+        <span class="toggle-label">Use RapidFuzz re-scoring</span>
+        <span class="toggle-flag">--use-rapidfuzz</span>
+        <div class="toggle-desc">Re-score matches with fuzz.ratio on raw UTF-8 text; reject if below threshold. Requires <code>pip install rapidfuzz</code>.</div>
+      </span>
+    </label>
+  </div>
+
+  <div class="field">
+    <label class="toggle-field" for="no_ignore_non_alpha">
+      <input type="checkbox" id="no_ignore_non_alpha">
+      <span class="toggle-track"></span>
+      <span>
+        <span class="toggle-label">Include punctuation / digits in matching</span>
+        <span class="toggle-flag">--no-ignore-non-alpha</span>
+        <div class="toggle-desc">By default only alphabetic characters are compared. Enable this to use the full text.</div>
+      </span>
+    </label>
+  </div>
+</div>
+
+<!-- Performance -->
+<div class="card">
+  <div class="card-title">Performance options</div>
+
+  <div class="field-row">
+    <div class="field">
+      <label>Worker processes <span class="flag">-j / --jobs</span> <span class="default">default: CPU count</span></label>
+      <input type="number" id="jobs" min="1" placeholder="auto">
+    </div>
+    <div class="field">
+      <label>Chunk size <span class="flag">--chunk-size</span> <span class="default">default 500000</span></label>
+      <input type="number" id="chunk_size" min="1" placeholder="500000">
+    </div>
+  </div>
+
+  <div class="field">
+    <label>Chunk overlap <span class="flag">--overlap</span> <span class="default">default: max(2 × min-len, 100)</span></label>
+    <input type="number" id="overlap" min="0" placeholder="auto">
+  </div>
+</div>
+
+<!-- Output -->
+<div class="card output-card">
+  <div class="card-title">Generated command</div>
+  <div class="cmd-wrap" id="cmd-output">
+    <span class="part-script">python find_similar_strings.py</span>
+    <span class="part-file"> &lt;file1&gt; &lt;file2&gt;</span>
+  </div>
+  <div class="btn-row">
+    <button class="btn-copy" onclick="copyCmd()">Copy</button>
+    <button class="btn-reset" onclick="resetForm()">Reset</button>
+    <span class="copy-status" id="copy-status">Copied!</span>
+  </div>
+</div>
+
+<script>
+  const DEFAULTS = { min_len: 100, max_len: 0, threshold: 0.8, chunk_size: 500000 };
+
+  const ids = [
+    "file1","file2","output",
+    "min_len","max_len","threshold",
+    "jobs","chunk_size","overlap",
+    "use_rapidfuzz","no_ignore_non_alpha"
+  ];
+
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    el.addEventListener("input", build);
+    el.addEventListener("change", build);
+  });
+
+  function val(id)     { return document.getElementById(id).value.trim(); }
+  function checked(id) { return document.getElementById(id).checked; }
+
+  function build() {
+    validate();
+
+    const file1 = val("file1") || "<file1>";
+    const file2 = val("file2") || "<file2>";
+
+    let parts = [
+      { cls: "part-script", text: "python find_similar_strings.py" },
+    ];
+
+    // output file
+    const out = val("output");
+    if (out) parts.push({ cls: "part-flag", text: " -o " }, { cls: "part-file", text: shell(out) });
+
+    // min-len
+    const mn = val("min_len");
+    if (mn && parseInt(mn) !== DEFAULTS.min_len)
+      parts.push({ cls: "part-flag", text: " --min-len " }, { cls: "part-value", text: mn });
+
+    // max-len
+    const mx = val("max_len");
+    if (mx && parseInt(mx) !== DEFAULTS.max_len)
+      parts.push({ cls: "part-flag", text: " --max-len " }, { cls: "part-value", text: mx });
+
+    // threshold
+    const th = val("threshold");
+    if (th && parseFloat(th) !== DEFAULTS.threshold)
+      parts.push({ cls: "part-flag", text: " --threshold " }, { cls: "part-value", text: th });
+
+    // jobs
+    const j = val("jobs");
+    if (j) parts.push({ cls: "part-flag", text: " --jobs " }, { cls: "part-value", text: j });
+
+    // chunk-size
+    const cs = val("chunk_size");
+    if (cs && parseInt(cs) !== DEFAULTS.chunk_size)
+      parts.push({ cls: "part-flag", text: " --chunk-size " }, { cls: "part-value", text: cs });
+
+    // overlap
+    const ov = val("overlap");
+    if (ov) parts.push({ cls: "part-flag", text: " --overlap " }, { cls: "part-value", text: ov });
+
+    // flags
+    if (checked("use_rapidfuzz"))      parts.push({ cls: "part-flag", text: " --use-rapidfuzz" });
+    if (checked("no_ignore_non_alpha")) parts.push({ cls: "part-flag", text: " --no-ignore-non-alpha" });
+
+    // positional args (always last)
+    parts.push(
+      { cls: "part-file", text: " " + shell(file1) },
+      { cls: "part-file", text: " " + shell(file2) },
+    );
+
+    document.getElementById("cmd-output").innerHTML =
+      parts.map(p => `<span class="${p.cls}">${escHtml(p.text)}</span>`).join("");
+  }
+
+  /** Wrap path in quotes if it contains spaces or special chars. */
+  function shell(s) {
+    return /[\s$`"'\\;|&<>()]/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s;
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+
+  function validate() {
+    const th = parseFloat(val("threshold"));
+    const hint = document.getElementById("threshold-hint");
+    const thEl = document.getElementById("threshold");
+    if (val("threshold") && (isNaN(th) || th <= 0 || th > 1)) {
+      thEl.classList.add("invalid");
+      hint.textContent = "Must be between 0 (exclusive) and 1.";
+      hint.style.color = "var(--red)";
+    } else {
+      thEl.classList.remove("invalid");
+      hint.textContent = "";
+    }
+
+    const mn = parseInt(val("min_len"));
+    const mx = parseInt(val("max_len"));
+    const mxEl = document.getElementById("max_len");
+    if (val("max_len") && mx > 0 && val("min_len") && mn > mx) {
+      mxEl.classList.add("invalid");
+    } else {
+      mxEl.classList.remove("invalid");
+    }
+  }
+
+  function plainCmd() {
+    const file1 = val("file1") || "<file1>";
+    const file2 = val("file2") || "<file2>";
+    let cmd = "python find_similar_strings.py";
+
+    const out = val("output");
+    if (out) cmd += ` -o ${shell(out)}`;
+
+    const mn = val("min_len");
+    if (mn && parseInt(mn) !== DEFAULTS.min_len) cmd += ` --min-len ${mn}`;
+
+    const mx = val("max_len");
+    if (mx && parseInt(mx) !== DEFAULTS.max_len) cmd += ` --max-len ${mx}`;
+
+    const th = val("threshold");
+    if (th && parseFloat(th) !== DEFAULTS.threshold) cmd += ` --threshold ${th}`;
+
+    const j = val("jobs");
+    if (j) cmd += ` --jobs ${j}`;
+
+    const cs = val("chunk_size");
+    if (cs && parseInt(cs) !== DEFAULTS.chunk_size) cmd += ` --chunk-size ${cs}`;
+
+    const ov = val("overlap");
+    if (ov) cmd += ` --overlap ${ov}`;
+
+    if (checked("use_rapidfuzz"))       cmd += " --use-rapidfuzz";
+    if (checked("no_ignore_non_alpha")) cmd += " --no-ignore-non-alpha";
+
+    cmd += ` ${shell(file1)} ${shell(file2)}`;
+    return cmd;
+  }
+
+  function copyCmd() {
+    navigator.clipboard.writeText(plainCmd()).then(() => {
+      const s = document.getElementById("copy-status");
+      s.classList.add("show");
+      setTimeout(() => s.classList.remove("show"), 1800);
+    });
+  }
+
+  function resetForm() {
+    ids.forEach(id => {
+      const el = document.getElementById(id);
+      if (el.type === "checkbox") el.checked = false;
+      else el.value = "";
+      el.classList.remove("invalid");
+    });
+    document.getElementById("threshold-hint").textContent = "";
+    build();
+  }
+
+  build(); // initial render
+</script>
+</body>
+</html>
