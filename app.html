@@ -1,0 +1,1019 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>find_similar_strings — browser</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #f5f6f8;
+  --surface:   #ffffff;
+  --border:    #dde1e9;
+  --accent:    #2563eb;
+  --accent-dk: #1d4ed8;
+  --text:      #1e2130;
+  --muted:     #6b7280;
+  --green:     #16a34a;
+  --red:       #dc2626;
+  --radius:    10px;
+  --mono:      "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  padding: 2rem;
+}
+
+header { margin-bottom: 1.75rem; }
+
+h1 {
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: -.02em;
+  margin-bottom: .2rem;
+}
+
+.subtitle { font-size: .85rem; color: var(--muted); }
+
+.layout {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.full-width { grid-column: 1 / -1; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.4rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+}
+
+.card-title {
+  font-size: .68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .09em;
+  color: var(--muted);
+  margin-bottom: 1rem;
+}
+
+.field { margin-bottom: .85rem; }
+.field:last-child { margin-bottom: 0; }
+
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .75rem;
+}
+
+label {
+  display: block;
+  font-size: .78rem;
+  font-weight: 500;
+  color: var(--muted);
+  margin-bottom: .3rem;
+}
+
+label .flag {
+  font-family: var(--mono);
+  font-size: .72rem;
+  color: var(--accent);
+}
+
+label .default {
+  font-size: .7rem;
+  color: #aab0be;
+  margin-left: .25rem;
+}
+
+input[type="text"],
+input[type="number"] {
+  width: 100%;
+  background: #fafbfc;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: .875rem;
+  padding: .42rem .65rem;
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+
+input[type="text"]:focus,
+input[type="number"]:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(37,99,235,.12);
+}
+
+/* File picker */
+.file-drop {
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+  position: relative;
+}
+
+.file-drop:hover, .file-drop.drag-over {
+  border-color: var(--accent);
+  background: #eff4ff;
+}
+
+.file-drop input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  width: 100%;
+  height: 100%;
+}
+
+.file-drop-icon {
+  font-size: 1.4rem;
+  margin-bottom: .25rem;
+}
+
+.file-drop-label {
+  font-size: .8rem;
+  color: var(--muted);
+}
+
+.file-drop-name {
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-top: .25rem;
+  font-family: var(--mono);
+  word-break: break-all;
+}
+
+/* Toggle */
+.toggle-field {
+  display: flex;
+  align-items: flex-start;
+  gap: .7rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle-field input[type="checkbox"] { display: none; }
+
+.toggle-track {
+  width: 34px;
+  height: 19px;
+  background: #d1d5db;
+  border-radius: 99px;
+  position: relative;
+  flex-shrink: 0;
+  margin-top: .15rem;
+  transition: background .2s;
+}
+
+.toggle-track::after {
+  content: "";
+  position: absolute;
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  background: #fff;
+  top: 3px; left: 3px;
+  transition: transform .2s;
+  box-shadow: 0 1px 2px rgba(0,0,0,.2);
+}
+
+input[type="checkbox"]:checked + .toggle-track { background: var(--accent); }
+input[type="checkbox"]:checked + .toggle-track::after { transform: translateX(15px); }
+
+.toggle-label { font-size: .83rem; font-weight: 500; color: var(--text); }
+.toggle-desc { font-size: .73rem; color: var(--muted); margin-top: .2rem; line-height: 1.4; }
+
+hr { border: none; border-top: 1px solid var(--border); margin: .9rem 0; }
+
+/* Run button */
+.btn-run {
+  width: 100%;
+  padding: .7rem 1.2rem;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: .95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, transform .1s, opacity .15s;
+}
+
+.btn-run:hover { background: var(--accent-dk); }
+.btn-run:active { transform: scale(.98); }
+.btn-run:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Progress */
+#progress-section {
+  margin-top: 1.25rem;
+}
+
+.progress-bar-wrap {
+  background: var(--border);
+  border-radius: 99px;
+  height: 6px;
+  overflow: hidden;
+  margin-bottom: .5rem;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 99px;
+  transition: width .2s;
+  width: 0%;
+}
+
+.progress-label {
+  font-size: .78rem;
+  color: var(--muted);
+}
+
+/* Results */
+#results-section { margin-top: 1.5rem; }
+
+.results-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+
+.results-stat {
+  font-size: .9rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.results-stat span {
+  color: var(--accent);
+}
+
+.btn-export {
+  padding: .35rem .85rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: .78rem;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--muted);
+  transition: background .15s, color .15s;
+}
+
+.btn-export:hover { background: #f1f3f6; color: var(--text); }
+
+/* Match cards */
+.match-list {
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+}
+
+.match-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 1px 3px rgba(0,0,0,.05);
+  overflow: hidden;
+}
+
+.match-header {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: .7rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: #fafbfc;
+  flex-wrap: wrap;
+}
+
+.sim-badge {
+  font-size: .82rem;
+  font-weight: 700;
+  font-family: var(--mono);
+  padding: .2rem .55rem;
+  border-radius: 5px;
+  color: #fff;
+  letter-spacing: .02em;
+  flex-shrink: 0;
+}
+
+.match-pos {
+  font-size: .72rem;
+  color: var(--muted);
+  font-family: var(--mono);
+  flex: 1;
+  min-width: 0;
+}
+
+.match-len {
+  font-size: .72rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.match-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 0;
+}
+
+@media (max-width: 640px) {
+  .match-body { grid-template-columns: 1fr; }
+}
+
+.match-panel {
+  padding: .8rem 1rem;
+  overflow: hidden;
+}
+
+.match-panel + .match-panel {
+  border-left: 1px solid var(--border);
+}
+
+@media (max-width: 640px) {
+  .match-panel + .match-panel {
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+}
+
+.match-file-label {
+  font-size: .67rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--muted);
+  margin-bottom: .4rem;
+}
+
+.match-text {
+  font-size: .82rem;
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 180px;
+  overflow: hidden;
+  position: relative;
+}
+
+.match-text.expanded { max-height: none; }
+
+.match-text::after {
+  content: "";
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 40px;
+  background: linear-gradient(transparent, white);
+  pointer-events: none;
+}
+
+.match-text.expanded::after { display: none; }
+
+.btn-expand {
+  background: none;
+  border: none;
+  font-size: .72rem;
+  color: var(--accent);
+  cursor: pointer;
+  padding: .2rem 0;
+  margin-top: .3rem;
+  display: block;
+}
+
+.btn-expand:hover { text-decoration: underline; }
+
+.hidden { display: none !important; }
+
+.error-msg {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: .75rem 1rem;
+  font-size: .83rem;
+  color: var(--red);
+  margin-top: 1rem;
+}
+
+input.invalid {
+  border-color: var(--red) !important;
+  box-shadow: 0 0 0 3px rgba(220,38,38,.1) !important;
+}
+
+.hint { font-size: .7rem; color: var(--red); margin-top: .25rem; }
+
+/* Sort controls */
+.sort-row {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  font-size: .78rem;
+  color: var(--muted);
+}
+
+.sort-row select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: .25rem .5rem;
+  font-size: .78rem;
+  color: var(--text);
+  outline: none;
+  cursor: pointer;
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>find_similar_strings</h1>
+  <p class="subtitle">Browser-native text similarity — no server, no install.</p>
+</header>
+
+<div class="layout">
+
+  <!-- Files -->
+  <div class="card">
+    <div class="card-title">Input files</div>
+
+    <div class="field">
+      <label>File 1</label>
+      <div class="file-drop" id="drop1">
+        <input type="file" id="file1-input" accept="text/*">
+        <div class="file-drop-icon">📄</div>
+        <div class="file-drop-label">Click or drag file here</div>
+        <div class="file-drop-name hidden" id="file1-name"></div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>File 2</label>
+      <div class="file-drop" id="drop2">
+        <input type="file" id="file2-input" accept="text/*">
+        <div class="file-drop-icon">📄</div>
+        <div class="file-drop-label">Click or drag file here</div>
+        <div class="file-drop-name hidden" id="file2-name"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Matching params -->
+  <div class="card">
+    <div class="card-title">Matching</div>
+
+    <div class="field-row">
+      <div class="field">
+        <label>Min length <span class="flag">-n</span> <span class="default">100</span></label>
+        <input type="number" id="min_len" min="1" placeholder="100" value="100">
+      </div>
+      <div class="field">
+        <label>Max length <span class="flag">--max-len</span> <span class="default">0 = ∞</span></label>
+        <input type="number" id="max_len" min="0" placeholder="0" value="0">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Threshold <span class="flag">-t</span> <span class="default">0.0–1.0</span></label>
+      <input type="number" id="threshold" min="0.01" max="1" step="0.01" placeholder="0.8" value="0.8">
+      <div class="hint hidden" id="threshold-hint">Must be between 0 (exclusive) and 1.</div>
+    </div>
+
+    <hr>
+
+    <div class="field">
+      <label class="toggle-field" for="no_ignore_non_alpha">
+        <input type="checkbox" id="no_ignore_non_alpha">
+        <span class="toggle-track"></span>
+        <span>
+          <span class="toggle-label">Include punctuation &amp; digits</span>
+          <div class="toggle-desc">By default only alphabetic characters are matched.</div>
+        </span>
+      </label>
+    </div>
+
+    <div class="field">
+      <label>Chunk size <span class="flag">--chunk-size</span> <span class="default">5000 alpha chars</span></label>
+      <input type="number" id="chunk_size" min="100" placeholder="5000" value="5000">
+    </div>
+  </div>
+
+  <!-- Run -->
+  <div class="card full-width">
+    <button class="btn-run" id="btn-run" disabled>Select both files to begin</button>
+    <div id="error-area"></div>
+  </div>
+
+</div>
+
+<!-- Progress -->
+<div id="progress-section" class="hidden">
+  <div class="card">
+    <div class="card-title">Processing</div>
+    <div class="progress-bar-wrap">
+      <div class="progress-bar-fill" id="progress-fill"></div>
+    </div>
+    <div class="progress-label" id="progress-label">Starting…</div>
+  </div>
+</div>
+
+<!-- Results -->
+<div id="results-section" class="hidden">
+  <div class="results-header">
+    <div class="results-stat" id="results-stat"></div>
+    <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
+      <div class="sort-row">
+        Sort:
+        <select id="sort-select">
+          <option value="sim-desc">Similarity ↓</option>
+          <option value="sim-asc">Similarity ↑</option>
+          <option value="pos">Position in file 1</option>
+          <option value="len-desc">Length ↓</option>
+        </select>
+      </div>
+      <button class="btn-export" id="btn-export-json">Export JSON</button>
+      <button class="btn-export" id="btn-export-csv">Export CSV</button>
+    </div>
+  </div>
+  <div class="match-list" id="match-list"></div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let text1 = null, text2 = null;
+let file1Name = '', file2Name = '';
+let results = []; // sorted, deduplicated match records
+
+// ── File loading ───────────────────────────────────────────────────────────
+function setupFileDrop(dropEl, inputEl, nameEl, slot) {
+  inputEl.addEventListener('change', () => {
+    if (inputEl.files[0]) loadFile(inputEl.files[0], nameEl, slot);
+  });
+  dropEl.addEventListener('dragover', e => { e.preventDefault(); dropEl.classList.add('drag-over'); });
+  dropEl.addEventListener('dragleave', () => dropEl.classList.remove('drag-over'));
+  dropEl.addEventListener('drop', e => {
+    e.preventDefault();
+    dropEl.classList.remove('drag-over');
+    if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0], nameEl, slot);
+  });
+}
+
+function loadFile(file, nameEl, slot) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    if (slot === 1) { text1 = e.target.result; file1Name = file.name; }
+    else            { text2 = e.target.result; file2Name = file.name; }
+    nameEl.textContent = file.name + ' (' + fmtSize(file.size) + ')';
+    nameEl.classList.remove('hidden');
+    updateRunBtn();
+  };
+  reader.readAsText(file, 'utf-8');
+}
+
+function fmtSize(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1048576).toFixed(1) + ' MB';
+}
+
+setupFileDrop(
+  document.getElementById('drop1'),
+  document.getElementById('file1-input'),
+  document.getElementById('file1-name'), 1
+);
+setupFileDrop(
+  document.getElementById('drop2'),
+  document.getElementById('file2-input'),
+  document.getElementById('file2-name'), 2
+);
+
+function updateRunBtn() {
+  const btn = document.getElementById('btn-run');
+  if (text1 && text2) {
+    btn.disabled = false;
+    btn.textContent = 'Find similar strings';
+  } else {
+    btn.disabled = true;
+    btn.textContent = 'Select both files to begin';
+  }
+}
+
+// ── Algorithm ──────────────────────────────────────────────────────────────
+
+function buildAlphaView(text) {
+  let alphaText = '';
+  const alphaToChar = [];
+  let i = 0;
+  for (const ch of text) {        // iterates code points correctly
+    if (/\p{L}/u.test(ch)) {
+      alphaText += ch;
+      alphaToChar.push(i);
+    }
+    i += ch.length;
+  }
+  return { alphaText, alphaToChar };
+}
+
+// Build b2j index once for a given string
+function buildB2J(b) {
+  const b2j = new Map();
+  for (let j = 0; j < b.length; j++) {
+    const c = b[j];
+    if (!b2j.has(c)) b2j.set(c, []);
+    b2j.get(c).push(j);
+  }
+  return b2j;
+}
+
+// Python difflib find_longest_match equivalent
+function findLongestMatch(a, b, alo, ahi, blo, bhi, b2j) {
+  let bestI = alo, bestJ = blo, bestSize = 0;
+  let j2len = {};
+
+  for (let i = alo; i < ahi; i++) {
+    const newj2len = {};
+    for (const j of (b2j.get(a[i]) || [])) {
+      if (j < blo) continue;
+      if (j >= bhi) break;         // b2j entries are sorted
+      const k = (j2len[j - 1] || 0) + 1;
+      newj2len[j] = k;
+      if (k > bestSize) {
+        bestI = i - k + 1;
+        bestJ = j - k + 1;
+        bestSize = k;
+      }
+    }
+    j2len = newj2len;
+  }
+  return [bestI, bestJ, bestSize];
+}
+
+// Python difflib get_matching_blocks equivalent
+function getMatchingBlocks(a, b, b2j) {
+  const queue = [[0, a.length, 0, b.length]];
+  const matching = [];
+
+  while (queue.length) {
+    const [alo, ahi, blo, bhi] = queue.pop();
+    const [i, j, n] = findLongestMatch(a, b, alo, ahi, blo, bhi, b2j);
+    if (n > 0) {
+      matching.push([i, j, n]);
+      if (alo < i && blo < j) queue.push([alo, i, blo, j]);
+      if (i + n < ahi && j + n < bhi) queue.push([i + n, ahi, j + n, bhi]);
+    }
+  }
+
+  matching.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+  matching.push([a.length, b.length, 0]);  // sentinel
+  return matching;
+}
+
+// Port of find_parallel_regions_local
+function findParallelRegions(slice1, alpha2, threshold, minLen, maxLen, b2j) {
+  const blocks = getMatchingBlocks(slice1, alpha2, b2j);
+  const regions = [];
+
+  let aStart = null, bStart = null, aEnd = null, bEnd = null, matchedUnits = 0;
+
+  function flushRegion() {
+    if (aStart === null) return;
+    const spanLen = Math.max(aEnd - aStart, bEnd - bStart);
+    if (spanLen > 0) {
+      const sim = matchedUnits / spanLen;
+      if (spanLen >= minLen && (maxLen === 0 || spanLen <= maxLen) && sim >= threshold) {
+        regions.push([aStart, aEnd, bStart, bEnd, sim]);
+      }
+    }
+    aStart = bStart = aEnd = bEnd = null;
+    matchedUnits = 0;
+  }
+
+  for (const [i, j, size] of blocks) {
+    if (size === 0) { flushRegion(); break; }
+
+    if (aStart === null) {
+      aStart = i; bStart = j; aEnd = i + size; bEnd = j + size; matchedUnits = size;
+      continue;
+    }
+
+    const newAEnd = i + size, newBEnd = j + size;
+    const spanLen = Math.max(newAEnd - aStart, newBEnd - bStart);
+    const proposedSim = (matchedUnits + size) / spanLen;
+
+    if (proposedSim >= threshold) {
+      matchedUnits += size;
+      aEnd = newAEnd; bEnd = newBEnd;
+    } else {
+      flushRegion();
+      aStart = i; bStart = j; aEnd = i + size; bEnd = j + size; matchedUnits = size;
+    }
+  }
+
+  return regions;
+}
+
+function makeChunks(length, chunkSize, overlap) {
+  const chunks = [];
+  let start = 0;
+  while (start < length) {
+    const end = Math.min(length, start + chunkSize);
+    chunks.push([
+      Math.max(0, start - overlap),
+      Math.min(length, end + overlap),
+    ]);
+    start = end;
+  }
+  return chunks;
+}
+
+// ── Main run ───────────────────────────────────────────────────────────────
+
+async function run() {
+  const threshold  = parseFloat(document.getElementById('threshold').value)  || 0.8;
+  const minLen     = parseInt(document.getElementById('min_len').value)       || 100;
+  const maxLen     = parseInt(document.getElementById('max_len').value)       || 0;
+  const chunkSize  = parseInt(document.getElementById('chunk_size').value)    || 5000;
+  const ignoreNonAlpha = !document.getElementById('no_ignore_non_alpha').checked;
+
+  // Validate
+  const errorArea = document.getElementById('error-area');
+  errorArea.innerHTML = '';
+  if (isNaN(threshold) || threshold <= 0 || threshold > 1) {
+    showError('Threshold must be between 0 (exclusive) and 1.'); return;
+  }
+  if (maxLen > 0 && maxLen < minLen) {
+    showError('Max length must be ≥ min length.'); return;
+  }
+
+  // Build views
+  const t0 = Date.now();
+  const a1 = ignoreNonAlpha ? buildAlphaView(text1) : identityView(text1);
+  const a2 = ignoreNonAlpha ? buildAlphaView(text2) : identityView(text2);
+
+  const overlap = Math.max(2 * minLen, 100);
+  const chunks  = makeChunks(a1.alphaText.length, chunkSize, overlap);
+
+  // UI: progress
+  setRunning(true);
+  showProgress(0, `0 / ${chunks.length} chunks`);
+
+  // Pre-build b2j for alpha2 once
+  const b2j = buildB2J(a2.alphaText);
+
+  // Process chunks
+  const rawRegions = []; // {charStart1, charEnd1, charStart2, charEnd2, sim}
+
+  for (let ci = 0; ci < chunks.length; ci++) {
+    const [chunkStart, chunkEnd] = chunks[ci];
+    const slice1 = a1.alphaText.slice(chunkStart, chunkEnd);
+
+    const regions = findParallelRegions(slice1, a2.alphaText, threshold, minLen, maxLen, b2j);
+
+    for (const [aS, aE, bS, bE, sim] of regions) {
+      const absAlphaS1 = aS + chunkStart;
+      const absAlphaE1 = aE + chunkStart;
+
+      const charS1 = a1.alphaToChar[absAlphaS1];
+      const charE1 = absAlphaE1 < a1.alphaToChar.length ? a1.alphaToChar[absAlphaE1] : text1.length;
+
+      const charS2 = a2.alphaToChar[bS];
+      const charE2 = bE < a2.alphaToChar.length ? a2.alphaToChar[bE] : text2.length;
+
+      rawRegions.push({ charS1, charE1, charS2, charE2, sim });
+    }
+
+    showProgress((ci + 1) / chunks.length, `${ci + 1} / ${chunks.length} chunks — ${rawRegions.length} raw matches`);
+
+    // Yield to browser every chunk so UI stays responsive
+    await yieldToBrowser();
+  }
+
+  // Deduplicate (keep max similarity per unique span)
+  const regionMap = new Map();
+  for (const r of rawRegions) {
+    const key = `${r.charS1},${r.charE1},${r.charS2},${r.charE2}`;
+    if (!regionMap.has(key) || regionMap.get(key).sim < r.sim) regionMap.set(key, r);
+  }
+
+  results = [...regionMap.values()].map(r => ({
+    start1:     r.charS1,
+    end1:       r.charE1,
+    start2:     r.charS2,
+    end2:       r.charE2,
+    similarity: r.sim,
+    text1:      text1.slice(r.charS1, r.charE1),
+    text2:      text2.slice(r.charS2, r.charE2),
+    spanLen:    Math.max(r.charE1 - r.charS1, r.charE2 - r.charS2),
+  }));
+
+  const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+  setRunning(false);
+  renderResults(results, elapsed);
+}
+
+function identityView(text) {
+  return {
+    alphaText: text,
+    alphaToChar: Array.from({ length: text.length }, (_, i) => i),
+  };
+}
+
+function yieldToBrowser() {
+  return new Promise(r => setTimeout(r, 0));
+}
+
+// ── UI helpers ─────────────────────────────────────────────────────────────
+
+function setRunning(running) {
+  const btn = document.getElementById('btn-run');
+  btn.disabled = running;
+  btn.textContent = running ? 'Processing…' : 'Find similar strings';
+  document.getElementById('progress-section').classList.toggle('hidden', !running);
+}
+
+function showProgress(frac, label) {
+  document.getElementById('progress-fill').style.width = (frac * 100).toFixed(1) + '%';
+  document.getElementById('progress-label').textContent = label;
+}
+
+function showError(msg) {
+  document.getElementById('error-area').innerHTML =
+    `<div class="error-msg">${escHtml(msg)}</div>`;
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Results rendering ──────────────────────────────────────────────────────
+
+function simColor(s) {
+  // Maps 0..1 → red(0°) to green(120°) in HSL, saturated
+  const h = Math.round(s * 120);
+  return `hsl(${h},70%,35%)`;
+}
+
+function sortResults(arr, mode) {
+  const copy = [...arr];
+  if (mode === 'sim-desc') copy.sort((a, b) => b.similarity - a.similarity);
+  else if (mode === 'sim-asc') copy.sort((a, b) => a.similarity - b.similarity);
+  else if (mode === 'pos')     copy.sort((a, b) => a.start1 - b.start1);
+  else if (mode === 'len-desc') copy.sort((a, b) => b.spanLen - a.spanLen);
+  return copy;
+}
+
+function renderResults(data, elapsed) {
+  document.getElementById('progress-section').classList.add('hidden');
+  const section = document.getElementById('results-section');
+  section.classList.remove('hidden');
+
+  const stat = document.getElementById('results-stat');
+  stat.innerHTML = `<span>${data.length}</span> match${data.length !== 1 ? 'es' : ''} found in ${elapsed}s`;
+
+  const mode = document.getElementById('sort-select').value;
+  renderMatchList(sortResults(data, mode));
+}
+
+function renderMatchList(sorted) {
+  const list = document.getElementById('match-list');
+  list.innerHTML = '';
+
+  if (sorted.length === 0) {
+    list.innerHTML = '<p style="color:var(--muted);font-size:.85rem;">No matches above threshold.</p>';
+    return;
+  }
+
+  for (const m of sorted) {
+    const pct = (m.similarity * 100).toFixed(1) + '%';
+    const color = simColor(m.similarity);
+
+    const card = document.createElement('div');
+    card.className = 'match-card';
+
+    card.innerHTML = `
+      <div class="match-header">
+        <span class="sim-badge" style="background:${escHtml(color)}">${escHtml(pct)}</span>
+        <span class="match-pos">
+          file1 ${m.start1}–${m.end1} &nbsp;·&nbsp; file2 ${m.start2}–${m.end2}
+        </span>
+        <span class="match-len">${m.spanLen} chars</span>
+      </div>
+      <div class="match-body">
+        <div class="match-panel">
+          <div class="match-file-label">${escHtml(file1Name || 'File 1')}</div>
+          <div class="match-text" id="mt1-${m.start1}-${m.start2}">${escHtml(m.text1)}</div>
+          <button class="btn-expand hidden" data-target="mt1-${m.start1}-${m.start2}">Show more</button>
+        </div>
+        <div class="match-panel">
+          <div class="match-file-label">${escHtml(file2Name || 'File 2')}</div>
+          <div class="match-text" id="mt2-${m.start1}-${m.start2}">${escHtml(m.text2)}</div>
+          <button class="btn-expand hidden" data-target="mt2-${m.start1}-${m.start2}">Show more</button>
+        </div>
+      </div>
+    `;
+
+    list.appendChild(card);
+
+    // Show "expand" buttons only when text is actually overflowing
+    requestAnimationFrame(() => {
+      for (const panelId of [`mt1-${m.start1}-${m.start2}`, `mt2-${m.start1}-${m.start2}`]) {
+        const el = document.getElementById(panelId);
+        if (!el) continue;
+        if (el.scrollHeight > el.clientHeight + 2) {
+          const btn = el.nextElementSibling;
+          btn.classList.remove('hidden');
+        }
+      }
+    });
+  }
+
+  // Expand buttons
+  list.addEventListener('click', e => {
+    if (!e.target.classList.contains('btn-expand')) return;
+    const target = document.getElementById(e.target.dataset.target);
+    if (!target) return;
+    target.classList.toggle('expanded');
+    e.target.textContent = target.classList.contains('expanded') ? 'Show less' : 'Show more';
+  });
+}
+
+// Re-sort without rerunning
+document.getElementById('sort-select').addEventListener('change', () => {
+  if (results.length > 0) renderMatchList(sortResults(results, document.getElementById('sort-select').value));
+});
+
+// ── Export ─────────────────────────────────────────────────────────────────
+
+document.getElementById('btn-export-json').addEventListener('click', () => {
+  const data = results.map(m => ({
+    file1: file1Name, start1: m.start1, end1: m.end1,
+    file2: file2Name, start2: m.start2, end2: m.end2,
+    similarity: Math.round(m.similarity * 100000) / 100000,
+    span_length_chars: m.spanLen,
+    text1: m.text1, text2: m.text2,
+  }));
+  download('matches.json', JSON.stringify(data, null, 2), 'application/json');
+});
+
+document.getElementById('btn-export-csv').addEventListener('click', () => {
+  const fields = ['file1','start1','end1','file2','start2','end2','similarity','span_length_chars','text1','text2'];
+  const rows = [fields.join(',')];
+  for (const m of results) {
+    rows.push([
+      csvCell(file1Name), m.start1, m.end1,
+      csvCell(file2Name), m.start2, m.end2,
+      Math.round(m.similarity * 100000) / 100000,
+      m.spanLen,
+      csvCell(m.text1), csvCell(m.text2),
+    ].join(','));
+  }
+  download('matches.csv', rows.join('\n'), 'text/csv');
+});
+
+function csvCell(v) {
+  const s = String(v);
+  return (s.includes(',') || s.includes('"') || s.includes('\n'))
+    ? '"' + s.replace(/"/g, '""') + '"'
+    : s;
+}
+
+function download(filename, content, type) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([content], { type }));
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+// ── Run button ─────────────────────────────────────────────────────────────
+
+document.getElementById('btn-run').addEventListener('click', () => {
+  if (!text1 || !text2) return;
+  document.getElementById('results-section').classList.add('hidden');
+  document.getElementById('error-area').innerHTML = '';
+  run().catch(err => {
+    setRunning(false);
+    showError('Error: ' + err.message);
+    console.error(err);
+  });
+});
+</script>
+</body>
+</html>
