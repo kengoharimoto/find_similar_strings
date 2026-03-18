@@ -4,20 +4,22 @@ find_similar_strings.py
 
 Find parallel (similar) passages between two large text files using
 chunked multiprocess difflib matching over a Unicode letter-only view.
-Outputs results as CSV.
+Outputs results as JSONL (default), JSON, SQLite, or CSV.
 """
 
 import argparse
 import csv
 import difflib
+import json
 import os
+import sqlite3
 import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from tqdm import tqdm
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 # ---------------------------------------------------------------------------
 # Per-worker globals (populated by init_worker, read-only in process_chunk)
@@ -38,18 +40,13 @@ GLOBAL_MIN_LEN: int = 100
 GLOBAL_MAX_LEN: int = 0
 GLOBAL_IGNORE_NON_ALPHA: bool = True
 
-CSV_HEADER = [
-    "file1",
-    "start1",
-    "end1",
-    "file2",
-    "start2",
-    "end2",
+FIELDS = [
+    "file1", "start1", "end1",
+    "file2", "start2", "end2",
     "span_length_bytes",
     "similarity_filtered",
     "similarity_rf",
-    "text1",
-    "text2",
+    "text1", "text2",
 ]
 
 
@@ -85,6 +82,97 @@ def build_alpha_view(text: str) -> Tuple[str, List[int]]:
     return "".join(alpha_chars), alpha_to_char
 
 
+def make_record(
+    path1: str, b_start1: int, b_end1: int,
+    path2: str, b_start2: int, b_end2: int,
+    span_len_bytes: int,
+    sim_filt: float, sim_rf: Optional[float],
+    text1: str, text2: str,
+) -> Dict:
+    return {
+        "file1": path1, "start1": b_start1, "end1": b_end1,
+        "file2": path2, "start2": b_start2, "end2": b_end2,
+        "span_length_bytes": span_len_bytes,
+        "similarity_filtered": round(sim_filt, 5),
+        "similarity_rf": round(sim_rf, 5) if sim_rf is not None else None,
+        "text1": text1,
+        "text2": text2,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Output writers
+# ---------------------------------------------------------------------------
+
+
+class JsonlWriter:
+    def __init__(self, stream):
+        self.stream = stream
+
+    def writerow(self, record: Dict):
+        self.stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    def finalize(self, records):
+        pass  # streaming — already written
+
+
+class JsonWriter:
+    def __init__(self, stream):
+        self.stream = stream
+
+    def writerow(self, record: Dict):
+        pass  # buffered — collected in main
+
+    def finalize(self, records):
+        json.dump(records, self.stream, ensure_ascii=False, indent=2)
+        self.stream.write("\n")
+
+
+class SqliteWriter:
+    def __init__(self, path: str):
+        self.conn = sqlite3.connect(path)
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS matches (
+                file1              TEXT,
+                start1             INTEGER,
+                end1               INTEGER,
+                file2              TEXT,
+                start2             INTEGER,
+                end2               INTEGER,
+                span_length_bytes  INTEGER,
+                similarity_filtered REAL,
+                similarity_rf      REAL,
+                text1              TEXT,
+                text2              TEXT
+            )
+            """
+        )
+        self.conn.commit()
+
+    def writerow(self, record: Dict):
+        self.conn.execute(
+            "INSERT INTO matches VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            [record[f] for f in FIELDS],
+        )
+
+    def finalize(self, records):
+        self.conn.commit()
+        self.conn.close()
+
+
+class CsvWriter:
+    def __init__(self, stream):
+        self.writer = csv.writer(stream)
+        self.writer.writerow(FIELDS)
+
+    def writerow(self, record: Dict):
+        self.writer.writerow([record[f] for f in FIELDS])
+
+    def finalize(self, records):
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Core matching logic
 # ---------------------------------------------------------------------------
@@ -100,19 +188,14 @@ def find_parallel_regions_local(
     """
     Find parallel regions between two string sequences using difflib.
 
-    `data1` and `data2` are the filtered (possibly letter-only) strings.
-
-    Returns a list of tuples:
-        (a_start, a_end, b_start, b_end, similarity)
-
-    where indices are character positions in the filtered strings and
+    Returns a list of (a_start, a_end, b_start, b_end, similarity) tuples
+    where indices are positions in the filtered strings and
     similarity = matched_chars / max(a_span, b_span).
     """
     sm = difflib.SequenceMatcher(None, data1, data2, autojunk=False)
     blocks = sm.get_matching_blocks()
 
     regions: List[Tuple[int, int, int, int, float]] = []
-
     a_start = b_start = a_end = b_end = None
     matched_units = 0
 
@@ -166,9 +249,6 @@ def process_chunk(args):
     """
     Worker function for a single chunk of file1 in alpha-index space.
 
-    Args:
-        args: (alpha_chunk_start, alpha_chunk_end)
-
     Returns a list of region tuples in byte-offset space:
         (byte_start1, byte_end1, byte_start2, byte_end2,
          similarity_filtered, similarity_rf_or_None)
@@ -192,19 +272,14 @@ def process_chunk(args):
 
     results = []
     for a_start, a_end, b_start, b_end, sim_filtered in local_regions:
-        # Convert local alpha indices to global alpha indices
         alpha_start1 = a_start + alpha_chunk_start
         alpha_end1 = a_end + alpha_chunk_start
-        alpha_start2 = b_start
-        alpha_end2 = b_end
 
-        # Map alpha indices -> original char indices
         char_start1 = GLOBAL_ALPHA_TO_CHAR1[alpha_start1]
         char_end1_excl = GLOBAL_ALPHA_TO_CHAR1[alpha_end1 - 1] + 1
-        char_start2 = GLOBAL_ALPHA_TO_CHAR2[alpha_start2]
-        char_end2_excl = GLOBAL_ALPHA_TO_CHAR2[alpha_end2 - 1] + 1
+        char_start2 = GLOBAL_ALPHA_TO_CHAR2[b_start]
+        char_end2_excl = GLOBAL_ALPHA_TO_CHAR2[b_end - 1] + 1
 
-        # Map char indices -> byte offsets
         byte_start1 = GLOBAL_CHAR_TO_BYTE1[char_start1]
         byte_end1 = (
             GLOBAL_CHAR_TO_BYTE1[char_end1_excl]
@@ -218,7 +293,6 @@ def process_chunk(args):
             else len(GLOBAL_DATA2)
         )
 
-        # Optional RapidFuzz re-scoring on raw text
         sim_rf: Optional[float] = None
         if rf_fuzz is not None:
             text1 = GLOBAL_DATA1[byte_start1:byte_end1].decode("utf-8", errors="replace")
@@ -241,21 +315,15 @@ def process_chunk(args):
 
 
 def make_chunks(length: int, chunk_size: int, overlap: int):
-    """
-    Yield (start, end) ranges covering [0, length) with the given
-    chunk_size and overlap (in alpha characters).
-    """
+    """Yield (start, end) ranges covering [0, length) with overlap."""
     if chunk_size <= 0:
         raise ValueError("chunk_size must be > 0")
     if overlap < 0:
         raise ValueError("overlap must be >= 0")
-
     start = 0
     while start < length:
         end = min(length, start + chunk_size)
-        chunk_start = max(0, start - overlap)
-        chunk_end = min(length, end + overlap)
-        yield (chunk_start, chunk_end)
+        yield (max(0, start - overlap), min(length, end + overlap))
         start = end
 
 
@@ -330,50 +398,52 @@ def main():
     parser = argparse.ArgumentParser(
         description=(
             "Find parallel (similar) passages between two large text files using "
-            "chunked multiprocess difflib matching over a Unicode letter-only view. "
-            "Outputs results as CSV."
+            "chunked multiprocess difflib matching over a Unicode letter-only view."
         )
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("file1", help="First input file")
     parser.add_argument("file2", help="Second input file")
     parser.add_argument(
-        "-o",
-        "--output",
+        "-o", "--output",
         default=None,
-        help="Write CSV output to this file instead of stdout.",
+        help="Write output to this file (required for --format sqlite).",
     )
     parser.add_argument(
-        "-n",
-        "--min-len",
-        type=int,
-        default=100,
+        "--format",
+        choices=["jsonl", "json", "sqlite", "csv"],
+        default="jsonl",
+        help=(
+            "Output format (default: jsonl). "
+            "jsonl: one JSON object per line; "
+            "json: pretty-printed JSON array; "
+            "sqlite: SQLite database (-o required); "
+            "csv: comma-separated values."
+        ),
+    )
+    parser.add_argument(
+        "-n", "--min-len",
+        type=int, default=100,
         help="Minimum region length in alphabetic characters (default: 100).",
     )
     parser.add_argument(
         "--max-len",
-        type=int,
-        default=0,
+        type=int, default=0,
         help="Maximum region length in alphabetic characters (0 = no limit, default: 0).",
     )
     parser.add_argument(
-        "-t",
-        "--threshold",
-        type=float,
-        default=0.8,
+        "-t", "--threshold",
+        type=float, default=0.8,
         help="Similarity threshold 0–1 (default: 0.8).",
     )
     parser.add_argument(
-        "-j",
-        "--jobs",
-        type=int,
-        default=None,
+        "-j", "--jobs",
+        type=int, default=None,
         help="Number of worker processes (default: CPU count).",
     )
     parser.add_argument(
         "--chunk-size",
-        type=int,
-        default=500_000,
+        type=int, default=500_000,
         help=(
             "Chunk size in alphabetic characters for file1 (default: 500000). "
             "Larger = fewer chunks but more memory per worker."
@@ -381,12 +451,10 @@ def main():
     )
     parser.add_argument(
         "--overlap",
-        type=int,
-        default=None,
+        type=int, default=None,
         help=(
             "Overlap between chunks in alphabetic characters "
-            "(default: max(2 * min_len, 100)). "
-            "Prevents matches crossing chunk boundaries from being missed."
+            "(default: max(2 * min_len, 100))."
         ),
     )
     parser.add_argument(
@@ -425,7 +493,8 @@ def main():
         parser.error("--chunk-size must be a positive integer.")
     if args.jobs is not None and args.jobs <= 0:
         parser.error("--jobs must be a positive integer.")
-
+    if args.format == "sqlite" and not args.output:
+        parser.error("--format sqlite requires -o/--output to specify the database file.")
     if not os.path.isfile(args.file1):
         parser.error(f"File not found: {args.file1!r}")
     if not os.path.isfile(args.file2):
@@ -442,7 +511,7 @@ def main():
 
     ignore_non_alpha = not args.no_ignore_non_alpha
 
-    # Build alpha view in main process to determine chunk count
+    # Read file1 in main process to determine chunk count
     with open(args.file1, "rb") as f:
         data1_main = f.read()
     text1_main = data1_main.decode("utf-8", errors="replace")
@@ -451,15 +520,27 @@ def main():
     )
     len_alpha1 = len(alpha_text1_main)
 
-    # Open output (file or stdout)
-    out_file = open(args.output, "w", newline="", encoding="utf-8") if args.output else None
-    out_stream = out_file if out_file is not None else sys.stdout
-
-    writer = csv.writer(out_stream)
-    writer.writerow(CSV_HEADER)
+    # Build the writer
+    if args.format == "sqlite":
+        writer = SqliteWriter(args.output)
+        out_file = None
+        out_stream = None
+    else:
+        out_file = (
+            open(args.output, "w", encoding="utf-8")
+            if args.output else None
+        )
+        out_stream = out_file if out_file is not None else sys.stdout
+        if args.format == "jsonl":
+            writer = JsonlWriter(out_stream)
+        elif args.format == "json":
+            writer = JsonWriter(out_stream)
+        else:  # csv
+            writer = CsvWriter(out_stream)
 
     if len_alpha1 == 0:
         print("Warning: no alphabetic characters found in file1.", file=sys.stderr)
+        writer.finalize([])
         if out_file:
             out_file.close()
         return
@@ -470,34 +551,23 @@ def main():
     with open(args.file2, "rb") as f:
         data2_main = f.read()
 
-    # Show progress on stderr; suppress if output goes to stdout to avoid mixing
-    show_progress = (out_file is not None) or (not sys.stdout.isatty() is False)
-    show_progress = True  # always show on stderr — it's a separate stream
-
     all_regions = []
 
     with ProcessPoolExecutor(
         max_workers=args.jobs,
         initializer=init_worker,
         initargs=(
-            args.file1,
-            args.file2,
-            args.use_rapidfuzz,
-            args.threshold,
-            args.min_len,
-            args.max_len,
+            args.file1, args.file2,
+            args.use_rapidfuzz, args.threshold,
+            args.min_len, args.max_len,
             ignore_non_alpha,
         ),
     ) as executor:
-        futures = [
-            executor.submit(process_chunk, chunk) for chunk in chunk_ranges
-        ]
+        futures = [executor.submit(process_chunk, chunk) for chunk in chunk_ranges]
 
         with tqdm(
-            total=len(futures),
-            desc="Processing chunks",
-            unit="chunk",
-            file=sys.stderr,
+            total=len(futures), desc="Processing chunks",
+            unit="chunk", file=sys.stderr,
         ) as pbar:
             for fut in as_completed(futures):
                 try:
@@ -509,8 +579,7 @@ def main():
                 finally:
                     pbar.update(1)
 
-    # Deduplicate: overlapping chunks may produce identical regions.
-    # Keep the maximum similarity scores when a duplicate is encountered.
+    # Deduplicate regions from overlapping chunks; keep max similarities
     region_dict = {}
     for b_start1, b_end1, b_start2, b_end2, sim_filt, sim_rf in all_regions:
         key = (b_start1, b_end1, b_start2, b_end2)
@@ -533,35 +602,30 @@ def main():
         key=lambda r: (r[0], r[2]),
     )
 
+    records = []
     for b_start1, b_end1, b_start2, b_end2, sim_filt, sim_rf in sorted_regions:
         span_len_bytes = max(b_end1 - b_start1, b_end2 - b_start2)
         text1 = data1_main[b_start1:b_end1].decode("utf-8", errors="replace")
         text2 = data2_main[b_start2:b_end2].decode("utf-8", errors="replace")
-
-        writer.writerow(
-            [
-                args.file1,
-                b_start1,
-                b_end1,
-                args.file2,
-                b_start2,
-                b_end2,
-                span_len_bytes,
-                f"{sim_filt:.5f}",
-                "" if sim_rf is None else f"{sim_rf:.5f}",
-                text1,
-                text2,
-            ]
+        record = make_record(
+            args.file1, b_start1, b_end1,
+            args.file2, b_start2, b_end2,
+            span_len_bytes, sim_filt, sim_rf,
+            text1, text2,
         )
+        writer.writerow(record)
+        records.append(record)
+
+    writer.finalize(records)
 
     if out_file:
         out_file.close()
-        print(
-            f"Wrote {len(sorted_regions)} region(s) to {args.output!r}.",
-            file=sys.stderr,
-        )
-    else:
-        print(f"Done. {len(sorted_regions)} region(s) found.", file=sys.stderr)
+
+    dest = f"{args.output!r}" if args.output else "stdout"
+    print(
+        f"Done. {len(sorted_regions)} region(s) written to {dest} ({args.format}).",
+        file=sys.stderr,
+    )
 
 
 if __name__ == "__main__":

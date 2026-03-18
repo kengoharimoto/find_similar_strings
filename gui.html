@@ -265,6 +265,57 @@
     color: var(--red);
     margin-top: .25rem;
   }
+
+  /* Format selector */
+  .format-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: .6rem;
+  }
+
+  .fmt-option {
+    display: flex;
+    gap: .6rem;
+    border: 1.5px solid var(--border);
+    border-radius: 7px;
+    padding: .7rem .8rem;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+    user-select: none;
+  }
+
+  .fmt-option:hover { border-color: #a5b4fc; background: #f8f9ff; }
+
+  .fmt-option input[type="radio"] { display: none; }
+
+  .fmt-option:has(input:checked) {
+    border-color: var(--accent);
+    background: #eff4ff;
+  }
+
+  .fmt-name {
+    font-size: .83rem;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: .2rem;
+  }
+
+  .fmt-default {
+    font-size: .68rem;
+    font-weight: 500;
+    background: #dbeafe;
+    color: var(--accent);
+    border-radius: 4px;
+    padding: .05rem .35rem;
+    margin-left: .3rem;
+    vertical-align: middle;
+  }
+
+  .fmt-desc {
+    font-size: .73rem;
+    color: var(--muted);
+    line-height: 1.4;
+  }
 </style>
 </head>
 <body>
@@ -291,8 +342,44 @@
     </div>
 
     <div class="field">
-      <label>Output CSV <span class="flag">-o</span> <span class="default">optional</span></label>
-      <input type="text" id="output" placeholder="/path/to/output.csv">
+      <label id="output-label">Output file <span class="flag">-o</span> <span class="default" id="output-default">optional</span></label>
+      <input type="text" id="output" placeholder="/path/to/output">
+    </div>
+  </div>
+
+  <!-- Format -->
+  <div class="card">
+    <div class="card-title">Output format <span class="flag">--format</span></div>
+
+    <div class="format-grid">
+      <label class="fmt-option" id="fmt-jsonl">
+        <input type="radio" name="format" value="jsonl" checked>
+        <div class="fmt-body">
+          <div class="fmt-name">JSONL <span class="fmt-default">default</span></div>
+          <div class="fmt-desc">One JSON object per line. Handles multi-line text natively. Streamable and easy to filter with <code>jq</code>.</div>
+        </div>
+      </label>
+      <label class="fmt-option" id="fmt-json">
+        <input type="radio" name="format" value="json">
+        <div class="fmt-body">
+          <div class="fmt-name">JSON</div>
+          <div class="fmt-desc">Pretty-printed JSON array. Best for small result sets or use with web tools.</div>
+        </div>
+      </label>
+      <label class="fmt-option" id="fmt-sqlite">
+        <input type="radio" name="format" value="sqlite">
+        <div class="fmt-body">
+          <div class="fmt-name">SQLite</div>
+          <div class="fmt-desc">Writes a <code>.db</code> file. Queryable with SQL. Requires <span class="flag" style="font-size:.72rem">-o</span>.</div>
+        </div>
+      </label>
+      <label class="fmt-option" id="fmt-csv">
+        <input type="radio" name="format" value="csv">
+        <div class="fmt-body">
+          <div class="fmt-name">CSV</div>
+          <div class="fmt-desc">Comma-separated values. Multi-line text is quoted. May display poorly in spreadsheets.</div>
+        </div>
+      </label>
     </div>
   </div>
 
@@ -393,18 +480,38 @@
     el.addEventListener("change", build);
   });
 
+  document.querySelectorAll('input[name="format"]').forEach(el => {
+    el.addEventListener("change", build);
+  });
+
   function val(id)     { return document.getElementById(id).value.trim(); }
   function checked(id) { return document.getElementById(id).checked; }
+  function format()    { return document.querySelector('input[name="format"]:checked').value; }
 
   function build() {
     validate();
 
+    const fmt = format();
     const file1 = val("file1") || "<file1>";
     const file2 = val("file2") || "<file2>";
+
+    // Update output field label hint for sqlite
+    const outDefault = document.getElementById("output-default");
+    if (fmt === "sqlite") {
+      outDefault.textContent = "required for sqlite";
+      outDefault.style.color = "var(--red)";
+    } else {
+      outDefault.textContent = "optional";
+      outDefault.style.color = "";
+    }
 
     const parts = [
       { cls: "part-script", text: "python find_similar_strings.py" },
     ];
+
+    // --format (omit when jsonl — it's the default)
+    if (fmt !== "jsonl")
+      parts.push({ cls: "part-flag", text: " --format " }, { cls: "part-value", text: fmt });
 
     const out = val("output");
     if (out) parts.push({ cls: "part-flag", text: " -o " }, { cls: "part-file", text: shell(out) });
@@ -473,9 +580,12 @@
   }
 
   function plainCmd() {
+    const fmt = format();
     const file1 = val("file1") || "<file1>";
     const file2 = val("file2") || "<file2>";
     let cmd = "python find_similar_strings.py";
+
+    if (fmt !== "jsonl") cmd += ` --format ${fmt}`;
 
     const out = val("output");
     if (out) cmd += ` -o ${shell(out)}`;
@@ -520,6 +630,7 @@
       else el.value = "";
       el.classList.remove("invalid");
     });
+    document.querySelector('input[name="format"][value="jsonl"]').checked = true;
     document.getElementById("threshold-hint").textContent = "";
     build();
   }
