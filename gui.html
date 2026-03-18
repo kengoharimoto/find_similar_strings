@@ -4,12 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>find_similar_strings — command builder</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>≈</text></svg>">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
     --bg:        #f5f6f8;
     --surface:   #ffffff;
+    --surface2:  #fafbfc;
     --border:    #dde1e9;
     --accent:    #2563eb;
     --accent-dk: #1d4ed8;
@@ -19,6 +21,21 @@
     --red:       #dc2626;
     --radius:    10px;
     --mono:      "JetBrains Mono", "Fira Code", "Cascadia Code", ui-monospace, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:        #111218;
+      --surface:   #1a1b26;
+      --surface2:  #22243a;
+      --border:    #2e3148;
+      --accent:    #60a5fa;
+      --accent-dk: #3b82f6;
+      --text:      #e2e8f0;
+      --muted:     #94a3b8;
+      --green:     #4ade80;
+      --red:       #f87171;
+    }
   }
 
   body {
@@ -109,7 +126,7 @@
   input[type="text"],
   input[type="number"] {
     width: 100%;
-    background: #fafbfc;
+    background: var(--surface2);
     border: 1px solid var(--border);
     border-radius: 6px;
     color: var(--text);
@@ -128,6 +145,13 @@
   input[type="text"]::placeholder,
   input[type="number"]::placeholder {
     color: #c4c9d4;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    input[type="text"]::placeholder,
+    input[type="number"]::placeholder {
+      color: #4a5068;
+    }
   }
 
   /* Toggle switch */
@@ -197,7 +221,7 @@
     margin: .9rem 0;
   }
 
-  /* Command output */
+  /* ── Command output ── */
   .cmd-wrap {
     background: #1e2130;
     border-radius: 6px;
@@ -242,12 +266,12 @@
   .btn-copy:hover { background: var(--accent-dk); }
 
   .btn-reset {
-    background: #f1f3f6;
+    background: var(--surface2);
     color: var(--muted);
     border: 1px solid var(--border);
   }
 
-  .btn-reset:hover { background: #e5e8ef; color: var(--text); }
+  .btn-reset:hover { background: var(--border); color: var(--text); }
 
   .copy-status {
     font-size: .78rem;
@@ -266,6 +290,20 @@
     margin-top: .25rem;
   }
 
+  /* Validation warning banner */
+  .warn-banner {
+    background: rgba(220,38,38,.06);
+    border: 1px solid rgba(220,38,38,.2);
+    border-radius: 6px;
+    padding: .55rem .8rem;
+    font-size: .78rem;
+    color: var(--red);
+    margin-top: .65rem;
+    line-height: 1.4;
+  }
+
+  .warn-banner.hidden { display: none; }
+
   /* Format selector */
   .format-grid {
     display: grid;
@@ -280,17 +318,21 @@
     border-radius: 7px;
     padding: .7rem .8rem;
     cursor: pointer;
-    transition: border-color .15s, background .15s;
+    transition: border-color .15s, background .15s, box-shadow .15s;
     user-select: none;
   }
 
-  .fmt-option:hover { border-color: #a5b4fc; background: #f8f9ff; }
+  .fmt-option:hover {
+    border-color: #a5b4fc;
+    background: rgba(37,99,235,.04);
+    box-shadow: 0 2px 8px rgba(0,0,0,.06);
+  }
 
   .fmt-option input[type="radio"] { display: none; }
 
   .fmt-option:has(input:checked) {
     border-color: var(--accent);
-    background: #eff4ff;
+    background: rgba(37,99,235,.06);
   }
 
   .fmt-name {
@@ -311,11 +353,79 @@
     vertical-align: middle;
   }
 
+  @media (prefers-color-scheme: dark) {
+    .fmt-default {
+      background: rgba(96,165,250,.15);
+    }
+  }
+
   .fmt-desc {
     font-size: .73rem;
     color: var(--muted);
     line-height: 1.4;
   }
+
+  /* jq hints */
+  .jq-hints {
+    margin-top: .75rem;
+    font-size: .78rem;
+    color: var(--muted);
+  }
+
+  .jq-hints summary {
+    cursor: pointer;
+    font-weight: 500;
+    color: var(--muted);
+    user-select: none;
+    font-size: .78rem;
+    padding: .25rem 0;
+  }
+
+  .jq-hints summary:hover { color: var(--text); }
+
+  .jq-list {
+    display: flex;
+    flex-direction: column;
+    gap: .4rem;
+    margin-top: .5rem;
+    padding-left: .2rem;
+  }
+
+  .jq-item {
+    display: flex;
+    gap: .5rem;
+    align-items: flex-start;
+  }
+
+  .jq-item code {
+    font-family: var(--mono);
+    font-size: .75rem;
+    background: var(--surface2);
+    padding: .25rem .5rem;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    word-break: break-all;
+    flex: 1;
+  }
+
+  .jq-desc {
+    font-size: .72rem;
+    color: var(--muted);
+    min-width: 8em;
+    flex-shrink: 0;
+  }
+
+  .jq-copy {
+    font-size: .7rem;
+    color: var(--accent);
+    cursor: pointer;
+    border: none;
+    background: none;
+    padding: .2rem;
+    flex-shrink: 0;
+  }
+
+  .jq-copy:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -380,6 +490,10 @@
           <div class="fmt-desc">Comma-separated values. Multi-line text is quoted. May display poorly in spreadsheets.</div>
         </div>
       </label>
+    </div>
+
+    <div class="warn-banner hidden" id="sqlite-warn">
+      SQLite format requires an output file (<code>-o</code>). Specify one in the Input files section above.
     </div>
   </div>
 
@@ -449,6 +563,42 @@
       <label>Chunk overlap <span class="flag">--overlap</span> <span class="default">max(2×min-len, 100)</span></label>
       <input type="number" id="overlap" min="0" placeholder="auto">
     </div>
+
+    <hr>
+
+    <div class="field">
+      <label class="toggle-field" for="fast">
+        <input type="checkbox" id="fast">
+        <span class="toggle-track"></span>
+        <span>
+          <span class="toggle-label">Fast mode</span>
+          <span class="toggle-flag">--fast</span>
+          <div class="toggle-desc">Enable difflib autojunk heuristic for faster matching. May miss regions with very common character patterns.</div>
+        </span>
+      </label>
+    </div>
+  </div>
+
+  <!-- Output options -->
+  <div class="card">
+    <div class="card-title">Output options</div>
+
+    <div class="field">
+      <label>Max results <span class="flag">--max-results</span> <span class="default">0 = no limit</span></label>
+      <input type="number" id="max_results" min="0" placeholder="0">
+    </div>
+
+    <div class="field">
+      <label class="toggle-field" for="quiet">
+        <input type="checkbox" id="quiet">
+        <span class="toggle-track"></span>
+        <span>
+          <span class="toggle-label">Quiet</span>
+          <span class="toggle-flag">-q</span>
+          <div class="toggle-desc">Suppress progress bar and summary on stderr. Useful when piping output.</div>
+        </span>
+      </label>
+    </div>
   </div>
 
   <!-- Generated command -->
@@ -460,49 +610,84 @@
       <button class="btn-reset" onclick="resetForm()">Reset</button>
       <span class="copy-status" id="copy-status">Copied!</span>
     </div>
+
+    <!-- jq hints -->
+    <details class="jq-hints" id="jq-section">
+      <summary>Common jq filters (for JSONL output)</summary>
+      <div class="jq-list">
+        <div class="jq-item">
+          <code id="jq1">| jq 'select(.similarity_filtered > 0.9)'</code>
+          <span class="jq-desc">High similarity only</span>
+          <button class="jq-copy" onclick="copyJq('jq1')">copy</button>
+        </div>
+        <div class="jq-item">
+          <code id="jq2">| jq -r '.text1'</code>
+          <span class="jq-desc">Extract file 1 text</span>
+          <button class="jq-copy" onclick="copyJq('jq2')">copy</button>
+        </div>
+        <div class="jq-item">
+          <code id="jq3">| jq 'select(.span_length_bytes > 500)'</code>
+          <span class="jq-desc">Long matches only</span>
+          <button class="jq-copy" onclick="copyJq('jq3')">copy</button>
+        </div>
+        <div class="jq-item">
+          <code id="jq4">| jq -s 'sort_by(-.similarity_filtered) | .[:20]'</code>
+          <span class="jq-desc">Top 20 by similarity</span>
+          <button class="jq-copy" onclick="copyJq('jq4')">copy</button>
+        </div>
+      </div>
+    </details>
   </div>
 
 </div><!-- /.layout -->
 
 <script>
-  const DEFAULTS = { min_len: 100, max_len: 0, threshold: 0.8, chunk_size: 500000 };
+  const DEFAULTS = { min_len: 100, max_len: 0, threshold: 0.8, chunk_size: 500000, max_results: 0 };
 
   const ids = [
     "file1","file2","output",
     "min_len","max_len","threshold",
     "jobs","chunk_size","overlap",
-    "use_rapidfuzz","no_ignore_non_alpha"
+    "use_rapidfuzz","no_ignore_non_alpha",
+    "fast","max_results","quiet"
   ];
 
   ids.forEach(id => {
     const el = document.getElementById(id);
-    el.addEventListener("input", build);
-    el.addEventListener("change", build);
+    el.addEventListener("input", onFormChange);
+    el.addEventListener("change", onFormChange);
   });
 
   document.querySelectorAll('input[name="format"]').forEach(el => {
-    el.addEventListener("change", build);
+    el.addEventListener("change", onFormChange);
   });
 
   function val(id)     { return document.getElementById(id).value.trim(); }
   function checked(id) { return document.getElementById(id).checked; }
   function format()    { return document.querySelector('input[name="format"]:checked').value; }
 
-  function build() {
+  function onFormChange() {
+    build();
     validate();
+    saveHash();
+  }
 
+  function build() {
     const fmt = format();
     const file1 = val("file1") || "<file1>";
     const file2 = val("file2") || "<file2>";
 
     // Update output field label hint for sqlite
     const outDefault = document.getElementById("output-default");
+    const sqliteWarn = document.getElementById("sqlite-warn");
     if (fmt === "sqlite") {
       outDefault.textContent = "required for sqlite";
       outDefault.style.color = "var(--red)";
+      sqliteWarn.classList.toggle("hidden", val("output") !== "");
     } else {
       outDefault.textContent = "optional";
       outDefault.style.color = "";
+      sqliteWarn.classList.add("hidden");
     }
 
     const parts = [
@@ -540,6 +725,13 @@
 
     if (checked("use_rapidfuzz"))       parts.push({ cls: "part-flag", text: " --use-rapidfuzz" });
     if (checked("no_ignore_non_alpha")) parts.push({ cls: "part-flag", text: " --no-ignore-non-alpha" });
+    if (checked("fast"))               parts.push({ cls: "part-flag", text: " --fast" });
+
+    const mr = val("max_results");
+    if (mr && parseInt(mr) !== DEFAULTS.max_results)
+      parts.push({ cls: "part-flag", text: " --max-results " }, { cls: "part-value", text: mr });
+
+    if (checked("quiet"))              parts.push({ cls: "part-flag", text: " -q" });
 
     parts.push(
       { cls: "part-file", text: " " + shell(file1) },
@@ -610,6 +802,12 @@
 
     if (checked("use_rapidfuzz"))       cmd += " --use-rapidfuzz";
     if (checked("no_ignore_non_alpha")) cmd += " --no-ignore-non-alpha";
+    if (checked("fast"))               cmd += " --fast";
+
+    const mr2 = val("max_results");
+    if (mr2 && parseInt(mr2) !== DEFAULTS.max_results) cmd += ` --max-results ${mr2}`;
+
+    if (checked("quiet"))              cmd += " -q";
 
     cmd += ` ${shell(file1)} ${shell(file2)}`;
     return cmd;
@@ -623,6 +821,16 @@
     });
   }
 
+  function copyJq(id) {
+    const text = document.getElementById(id).textContent.trim();
+    navigator.clipboard.writeText(text).then(() => {
+      const btn = document.querySelector(`[onclick="copyJq('${id}')"]`);
+      const orig = btn.textContent;
+      btn.textContent = 'copied!';
+      setTimeout(() => btn.textContent = orig, 1500);
+    });
+  }
+
   function resetForm() {
     ids.forEach(id => {
       const el = document.getElementById(id);
@@ -632,10 +840,52 @@
     });
     document.querySelector('input[name="format"][value="jsonl"]').checked = true;
     document.getElementById("threshold-hint").textContent = "";
+    document.getElementById("sqlite-warn").classList.add("hidden");
     build();
+    saveHash();
   }
 
+  // ── URL hash state ──────────────────────────────────────────────────────
+
+  function saveHash() {
+    const params = new URLSearchParams();
+    ids.forEach(id => {
+      const el = document.getElementById(id);
+      if (el.type === "checkbox") {
+        if (el.checked) params.set(id, "1");
+      } else if (el.value.trim()) {
+        params.set(id, el.value.trim());
+      }
+    });
+    const fmt = format();
+    if (fmt !== "jsonl") params.set("format", fmt);
+    const hash = params.toString();
+    history.replaceState(null, "", hash ? "#" + hash : location.pathname);
+  }
+
+  function loadHash() {
+    if (!location.hash || location.hash.length < 2) return;
+    try {
+      const params = new URLSearchParams(location.hash.slice(1));
+      params.forEach((value, key) => {
+        if (key === "format") {
+          const radio = document.querySelector(`input[name="format"][value="${value}"]`);
+          if (radio) radio.checked = true;
+          return;
+        }
+        const el = document.getElementById(key);
+        if (!el) return;
+        if (el.type === "checkbox") el.checked = value === "1";
+        else el.value = value;
+      });
+    } catch (e) {
+      // ignore malformed hash
+    }
+  }
+
+  loadHash();
   build();
+  validate();
 </script>
 </body>
 </html>

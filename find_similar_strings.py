@@ -14,12 +14,13 @@ import json
 import os
 import sqlite3
 import sys
+import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Dict, List, Optional, Tuple
 
 from tqdm import tqdm
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 # ---------------------------------------------------------------------------
 # Per-worker globals (populated by init_worker, read-only in process_chunk)
@@ -32,13 +33,14 @@ GLOBAL_CHAR_TO_BYTE1: Optional[List[int]] = None
 GLOBAL_CHAR_TO_BYTE2: Optional[List[int]] = None
 GLOBAL_ALPHA_TEXT1: Optional[str] = None
 GLOBAL_ALPHA_TEXT2: Optional[str] = None
-GLOBAL_ALPHA_TO_CHAR1: Optional[List[int]] = None
-GLOBAL_ALPHA_TO_CHAR2: Optional[List[int]] = None
+GLOBAL_ALPHA_TO_CHAR1 = None  # List[int] or IdentityList
+GLOBAL_ALPHA_TO_CHAR2 = None  # List[int] or IdentityList
 GLOBAL_USE_RAPIDFUZZ: bool = False
 GLOBAL_THRESHOLD: float = 0.8
 GLOBAL_MIN_LEN: int = 100
 GLOBAL_MAX_LEN: int = 0
 GLOBAL_IGNORE_NON_ALPHA: bool = True
+GLOBAL_AUTOJUNK: bool = False
 
 FIELDS = [
     "file1", "start1", "end1",
@@ -51,17 +53,53 @@ FIELDS = [
 
 
 # ---------------------------------------------------------------------------
+# Zero-allocation identity list (used when --no-ignore-non-alpha)
+# ---------------------------------------------------------------------------
+
+
+class IdentityList:
+    """Acts like list(range(n)) but uses no memory for storage."""
+
+    __slots__ = ("_n",)
+
+    def __init__(self, n: int):
+        self._n = n
+
+    def __getitem__(self, i: int) -> int:
+        if i < 0:
+            i += self._n
+        if 0 <= i < self._n:
+            return i
+        raise IndexError(i)
+
+    def __len__(self) -> int:
+        return self._n
+
+
+# ---------------------------------------------------------------------------
 # Utility functions
 # ---------------------------------------------------------------------------
 
 
-def build_char_to_byte_map(data: bytes, text: str) -> List[int]:
-    """Map each character index in `text` to its byte offset in `data`."""
+def build_char_to_byte_map(text: str) -> List[int]:
+    """Map each character index in `text` to its byte offset in UTF-8 encoding.
+
+    Uses ord() to determine UTF-8 byte length per code point, avoiding
+    per-character bytes object allocation.
+    """
     mapping: List[int] = []
     offset = 0
     for ch in text:
         mapping.append(offset)
-        offset += len(ch.encode("utf-8"))
+        cp = ord(ch)
+        if cp < 0x80:
+            offset += 1
+        elif cp < 0x800:
+            offset += 2
+        elif cp < 0x10000:
+            offset += 3
+        else:
+            offset += 4
     return mapping
 
 
@@ -80,6 +118,11 @@ def build_alpha_view(text: str) -> Tuple[str, List[int]]:
             alpha_chars.append(ch)
             alpha_to_char.append(idx)
     return "".join(alpha_chars), alpha_to_char
+
+
+def count_alpha(text: str) -> int:
+    """Count alphabetic characters without building the full alpha string."""
+    return sum(1 for ch in text if ch.isalpha())
 
 
 def make_record(
@@ -149,14 +192,23 @@ class SqliteWriter:
             """
         )
         self.conn.commit()
+        self._buffer: List[list] = []
 
     def writerow(self, record: Dict):
-        self.conn.execute(
-            "INSERT INTO matches VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            [record[f] for f in FIELDS],
-        )
+        self._buffer.append([record[f] for f in FIELDS])
+        if len(self._buffer) >= 1000:
+            self._flush()
+
+    def _flush(self):
+        if self._buffer:
+            self.conn.executemany(
+                "INSERT INTO matches VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                self._buffer,
+            )
+            self._buffer.clear()
 
     def finalize(self, records):
+        self._flush()
         self.conn.commit()
         self.conn.close()
 
@@ -184,6 +236,7 @@ def find_parallel_regions_local(
     threshold: float,
     min_len: int,
     max_len: int,
+    autojunk: bool = False,
 ) -> List[Tuple[int, int, int, int, float]]:
     """
     Find parallel regions between two string sequences using difflib.
@@ -191,8 +244,12 @@ def find_parallel_regions_local(
     Returns a list of (a_start, a_end, b_start, b_end, similarity) tuples
     where indices are positions in the filtered strings and
     similarity = matched_chars / max(a_span, b_span).
+
+    When autojunk=True (--fast mode), difflib's heuristic marks frequently
+    occurring elements as junk, which speeds up matching but may miss some
+    regions containing common character patterns.
     """
-    sm = difflib.SequenceMatcher(None, data1, data2, autojunk=False)
+    sm = difflib.SequenceMatcher(None, data1, data2, autojunk=autojunk)
     blocks = sm.get_matching_blocks()
 
     regions: List[Tuple[int, int, int, int, float]] = []
@@ -263,6 +320,7 @@ def process_chunk(args):
         GLOBAL_THRESHOLD,
         GLOBAL_MIN_LEN,
         GLOBAL_MAX_LEN,
+        autojunk=GLOBAL_AUTOJUNK,
     )
 
     rf_fuzz = None
@@ -340,8 +398,14 @@ def init_worker(
     min_len: int,
     max_len: int,
     ignore_non_alpha: bool,
+    autojunk: bool,
 ):
-    """Read both files and populate all worker-process globals."""
+    """Read both files and populate all worker-process globals.
+
+    Each worker reads both files independently. On Linux (fork start method),
+    the OS uses copy-on-write so globals from the parent are shared until
+    modified. On macOS/Windows (spawn), each worker gets its own copies.
+    """
     global GLOBAL_DATA1, GLOBAL_DATA2
     global GLOBAL_TEXT1, GLOBAL_TEXT2
     global GLOBAL_CHAR_TO_BYTE1, GLOBAL_CHAR_TO_BYTE2
@@ -349,6 +413,7 @@ def init_worker(
     global GLOBAL_ALPHA_TO_CHAR1, GLOBAL_ALPHA_TO_CHAR2
     global GLOBAL_USE_RAPIDFUZZ, GLOBAL_THRESHOLD
     global GLOBAL_MIN_LEN, GLOBAL_MAX_LEN, GLOBAL_IGNORE_NON_ALPHA
+    global GLOBAL_AUTOJUNK
 
     with open(path1, "rb") as f1:
         GLOBAL_DATA1 = f1.read()
@@ -358,8 +423,8 @@ def init_worker(
     GLOBAL_TEXT1 = GLOBAL_DATA1.decode("utf-8", errors="replace")
     GLOBAL_TEXT2 = GLOBAL_DATA2.decode("utf-8", errors="replace")
 
-    GLOBAL_CHAR_TO_BYTE1 = build_char_to_byte_map(GLOBAL_DATA1, GLOBAL_TEXT1)
-    GLOBAL_CHAR_TO_BYTE2 = build_char_to_byte_map(GLOBAL_DATA2, GLOBAL_TEXT2)
+    GLOBAL_CHAR_TO_BYTE1 = build_char_to_byte_map(GLOBAL_TEXT1)
+    GLOBAL_CHAR_TO_BYTE2 = build_char_to_byte_map(GLOBAL_TEXT2)
 
     GLOBAL_IGNORE_NON_ALPHA = ignore_non_alpha
 
@@ -369,13 +434,14 @@ def init_worker(
     else:
         GLOBAL_ALPHA_TEXT1 = GLOBAL_TEXT1
         GLOBAL_ALPHA_TEXT2 = GLOBAL_TEXT2
-        GLOBAL_ALPHA_TO_CHAR1 = list(range(len(GLOBAL_TEXT1)))
-        GLOBAL_ALPHA_TO_CHAR2 = list(range(len(GLOBAL_TEXT2)))
+        GLOBAL_ALPHA_TO_CHAR1 = IdentityList(len(GLOBAL_TEXT1))
+        GLOBAL_ALPHA_TO_CHAR2 = IdentityList(len(GLOBAL_TEXT2))
 
     GLOBAL_USE_RAPIDFUZZ = use_rapidfuzz
     GLOBAL_THRESHOLD = threshold
     GLOBAL_MIN_LEN = min_len
     GLOBAL_MAX_LEN = max_len
+    GLOBAL_AUTOJUNK = autojunk
 
     if use_rapidfuzz:
         try:
@@ -392,6 +458,15 @@ def init_worker(
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
+
+def fmt_size(n: int) -> str:
+    """Format byte count as human-readable size."""
+    if n < 1024:
+        return f"{n} B"
+    if n < 1048576:
+        return f"{n / 1024:.1f} KB"
+    return f"{n / 1048576:.1f} MB"
 
 
 def main():
@@ -434,7 +509,7 @@ def main():
     parser.add_argument(
         "-t", "--threshold",
         type=float, default=0.8,
-        help="Similarity threshold 0–1 (default: 0.8).",
+        help="Similarity threshold 0\u20131 (default: 0.8).",
     )
     parser.add_argument(
         "-j", "--jobs",
@@ -473,6 +548,27 @@ def main():
             "(punctuation, digits, spaces) are ignored during matching."
         ),
     )
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help=(
+            "Enable difflib autojunk heuristic for faster matching. "
+            "May miss regions containing very common character patterns."
+        ),
+    )
+    parser.add_argument(
+        "--max-results",
+        type=int, default=0,
+        help=(
+            "Maximum number of results to output (0 = no limit, default: 0). "
+            "Results are sorted by position before truncation."
+        ),
+    )
+    parser.add_argument(
+        "-q", "--quiet",
+        action="store_true",
+        help="Suppress progress bar and summary output on stderr.",
+    )
 
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
@@ -493,6 +589,8 @@ def main():
         parser.error("--chunk-size must be a positive integer.")
     if args.jobs is not None and args.jobs <= 0:
         parser.error("--jobs must be a positive integer.")
+    if args.max_results < 0:
+        parser.error("--max-results must be >= 0 (use 0 for no limit).")
     if args.format == "sqlite" and not args.output:
         parser.error("--format sqlite requires -o/--output to specify the database file.")
     if not os.path.isfile(args.file1):
@@ -510,122 +608,155 @@ def main():
             )
 
     ignore_non_alpha = not args.no_ignore_non_alpha
+    t_start = time.monotonic()
 
     # Read file1 in main process to determine chunk count
     with open(args.file1, "rb") as f:
         data1_main = f.read()
     text1_main = data1_main.decode("utf-8", errors="replace")
-    alpha_text1_main = (
-        build_alpha_view(text1_main)[0] if ignore_non_alpha else text1_main
-    )
-    len_alpha1 = len(alpha_text1_main)
+
+    if ignore_non_alpha:
+        len_alpha1 = count_alpha(text1_main)
+    else:
+        len_alpha1 = len(text1_main)
+
+    # Memory estimation warning
+    num_workers = args.jobs or os.cpu_count() or 1
+    file1_bytes = len(data1_main)
+    file2_bytes = os.path.getsize(args.file2)
+    est_gb = num_workers * (file1_bytes + file2_bytes) * 5 / (1 << 30)
+    if est_gb > 4 and not args.quiet:
+        print(
+            f"Warning: estimated memory usage ~{est_gb:.1f} GB "
+            f"({num_workers} workers \u00d7 {fmt_size(file1_bytes + file2_bytes)} \u00d7 ~5). "
+            f"Consider reducing -j or --chunk-size.",
+            file=sys.stderr,
+        )
 
     # Build the writer
-    if args.format == "sqlite":
-        writer = SqliteWriter(args.output)
-        out_file = None
-        out_stream = None
-    else:
-        out_file = (
-            open(args.output, "w", encoding="utf-8")
-            if args.output else None
-        )
-        out_stream = out_file if out_file is not None else sys.stdout
-        if args.format == "jsonl":
-            writer = JsonlWriter(out_stream)
-        elif args.format == "json":
-            writer = JsonWriter(out_stream)
-        else:  # csv
-            writer = CsvWriter(out_stream)
+    out_file = None
+    writer = None
+    try:
+        if args.format == "sqlite":
+            writer = SqliteWriter(args.output)
+            out_stream = None
+        else:
+            out_file = (
+                open(args.output, "w", encoding="utf-8")
+                if args.output else None
+            )
+            out_stream = out_file if out_file is not None else sys.stdout
+            if args.format == "jsonl":
+                writer = JsonlWriter(out_stream)
+            elif args.format == "json":
+                writer = JsonWriter(out_stream)
+            else:  # csv
+                writer = CsvWriter(out_stream)
 
-    if len_alpha1 == 0:
-        print("Warning: no alphabetic characters found in file1.", file=sys.stderr)
-        writer.finalize([])
+        if len_alpha1 == 0:
+            if not args.quiet:
+                print("Warning: no alphabetic characters found in file1.", file=sys.stderr)
+            writer.finalize([])
+            return
+
+        overlap = args.overlap if args.overlap is not None else max(2 * args.min_len, 100)
+        chunk_ranges = list(make_chunks(len_alpha1, args.chunk_size, overlap))
+
+        all_regions = []
+
+        try:
+            with ProcessPoolExecutor(
+                max_workers=args.jobs,
+                initializer=init_worker,
+                initargs=(
+                    args.file1, args.file2,
+                    args.use_rapidfuzz, args.threshold,
+                    args.min_len, args.max_len,
+                    ignore_non_alpha, args.fast,
+                ),
+            ) as executor:
+                futures = [executor.submit(process_chunk, chunk) for chunk in chunk_ranges]
+
+                with tqdm(
+                    total=len(futures), desc="Processing chunks",
+                    unit="chunk", file=sys.stderr,
+                    disable=args.quiet,
+                ) as pbar:
+                    for fut in as_completed(futures):
+                        try:
+                            regions = fut.result()
+                        except Exception as exc:
+                            print(f"Worker error: {exc}", file=sys.stderr)
+                        else:
+                            all_regions.extend(regions)
+                        finally:
+                            pbar.update(1)
+        except KeyboardInterrupt:
+            print("\nInterrupted by user.", file=sys.stderr)
+            sys.exit(130)
+
+        # Deduplicate regions from overlapping chunks; keep max similarities
+        region_dict = {}
+        for b_start1, b_end1, b_start2, b_end2, sim_filt, sim_rf in all_regions:
+            key = (b_start1, b_end1, b_start2, b_end2)
+            if key in region_dict:
+                prev_filt, prev_rf = region_dict[key]
+                best_filt = max(prev_filt, sim_filt)
+                best_rf = (
+                    None if prev_rf is None and sim_rf is None
+                    else max(x for x in (prev_rf, sim_rf) if x is not None)
+                )
+                region_dict[key] = (best_filt, best_rf)
+            else:
+                region_dict[key] = (sim_filt, sim_rf)
+
+        sorted_regions = sorted(
+            (
+                (b_start1, b_end1, b_start2, b_end2, sims[0], sims[1])
+                for (b_start1, b_end1, b_start2, b_end2), sims in region_dict.items()
+            ),
+            key=lambda r: (r[0], r[2]),
+        )
+
+        # Apply --max-results truncation
+        if args.max_results > 0 and len(sorted_regions) > args.max_results:
+            sorted_regions = sorted_regions[:args.max_results]
+
+        # Read file2 for final text extraction (deferred to reduce peak memory)
+        with open(args.file2, "rb") as f:
+            data2_main = f.read()
+
+        records = []
+        for b_start1, b_end1, b_start2, b_end2, sim_filt, sim_rf in sorted_regions:
+            span_len_bytes = max(b_end1 - b_start1, b_end2 - b_start2)
+            text1 = data1_main[b_start1:b_end1].decode("utf-8", errors="replace")
+            text2 = data2_main[b_start2:b_end2].decode("utf-8", errors="replace")
+            record = make_record(
+                args.file1, b_start1, b_end1,
+                args.file2, b_start2, b_end2,
+                span_len_bytes, sim_filt, sim_rf,
+                text1, text2,
+            )
+            writer.writerow(record)
+            records.append(record)
+
+        writer.finalize(records)
+    finally:
         if out_file:
             out_file.close()
-        return
 
-    overlap = args.overlap if args.overlap is not None else max(2 * args.min_len, 100)
-    chunk_ranges = list(make_chunks(len_alpha1, args.chunk_size, overlap))
+    elapsed = time.monotonic() - t_start
 
-    with open(args.file2, "rb") as f:
-        data2_main = f.read()
-
-    all_regions = []
-
-    with ProcessPoolExecutor(
-        max_workers=args.jobs,
-        initializer=init_worker,
-        initargs=(
-            args.file1, args.file2,
-            args.use_rapidfuzz, args.threshold,
-            args.min_len, args.max_len,
-            ignore_non_alpha,
-        ),
-    ) as executor:
-        futures = [executor.submit(process_chunk, chunk) for chunk in chunk_ranges]
-
-        with tqdm(
-            total=len(futures), desc="Processing chunks",
-            unit="chunk", file=sys.stderr,
-        ) as pbar:
-            for fut in as_completed(futures):
-                try:
-                    regions = fut.result()
-                except Exception as exc:
-                    print(f"Worker error: {exc}", file=sys.stderr)
-                else:
-                    all_regions.extend(regions)
-                finally:
-                    pbar.update(1)
-
-    # Deduplicate regions from overlapping chunks; keep max similarities
-    region_dict = {}
-    for b_start1, b_end1, b_start2, b_end2, sim_filt, sim_rf in all_regions:
-        key = (b_start1, b_end1, b_start2, b_end2)
-        if key in region_dict:
-            prev_filt, prev_rf = region_dict[key]
-            best_filt = max(prev_filt, sim_filt)
-            best_rf = (
-                None if prev_rf is None and sim_rf is None
-                else max(x for x in (prev_rf, sim_rf) if x is not None)
-            )
-            region_dict[key] = (best_filt, best_rf)
-        else:
-            region_dict[key] = (sim_filt, sim_rf)
-
-    sorted_regions = sorted(
-        (
-            (b_start1, b_end1, b_start2, b_end2, sims[0], sims[1])
-            for (b_start1, b_end1, b_start2, b_end2), sims in region_dict.items()
-        ),
-        key=lambda r: (r[0], r[2]),
-    )
-
-    records = []
-    for b_start1, b_end1, b_start2, b_end2, sim_filt, sim_rf in sorted_regions:
-        span_len_bytes = max(b_end1 - b_start1, b_end2 - b_start2)
-        text1 = data1_main[b_start1:b_end1].decode("utf-8", errors="replace")
-        text2 = data2_main[b_start2:b_end2].decode("utf-8", errors="replace")
-        record = make_record(
-            args.file1, b_start1, b_end1,
-            args.file2, b_start2, b_end2,
-            span_len_bytes, sim_filt, sim_rf,
-            text1, text2,
+    if not args.quiet:
+        dest = f"{args.output!r}" if args.output else "stdout"
+        truncated = ""
+        if args.max_results > 0 and len(region_dict) > args.max_results:
+            truncated = f" (limited from {len(region_dict)} total)"
+        print(
+            f"Done. {len(sorted_regions)} region(s) written to {dest} "
+            f"({args.format}) in {elapsed:.1f}s.{truncated}",
+            file=sys.stderr,
         )
-        writer.writerow(record)
-        records.append(record)
-
-    writer.finalize(records)
-
-    if out_file:
-        out_file.close()
-
-    dest = f"{args.output!r}" if args.output else "stdout"
-    print(
-        f"Done. {len(sorted_regions)} region(s) written to {dest} ({args.format}).",
-        file=sys.stderr,
-    )
 
 
 if __name__ == "__main__":

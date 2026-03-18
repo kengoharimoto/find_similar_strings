@@ -4,12 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>find_similar_strings — browser</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>≈</text></svg>">
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
   --bg:        #f5f6f8;
   --surface:   #ffffff;
+  --surface2:  #fafbfc;
   --border:    #dde1e9;
   --accent:    #2563eb;
   --accent-dk: #1d4ed8;
@@ -19,6 +21,21 @@
   --red:       #dc2626;
   --radius:    10px;
   --mono:      "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:        #111218;
+    --surface:   #1a1b26;
+    --surface2:  #22243a;
+    --border:    #2e3148;
+    --accent:    #60a5fa;
+    --accent-dk: #3b82f6;
+    --text:      #e2e8f0;
+    --muted:     #94a3b8;
+    --green:     #4ade80;
+    --red:       #f87171;
+  }
 }
 
 body {
@@ -55,6 +72,7 @@ h1 {
   border-radius: var(--radius);
   padding: 1.25rem 1.4rem;
   box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  transition: box-shadow .15s;
 }
 
 .card-title {
@@ -98,7 +116,7 @@ label .default {
 input[type="text"],
 input[type="number"] {
   width: 100%;
-  background: #fafbfc;
+  background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--text);
@@ -127,7 +145,7 @@ input[type="number"]:focus {
 
 .file-drop:hover, .file-drop.drag-over {
   border-color: var(--accent);
-  background: #eff4ff;
+  background: rgba(37,99,235,.06);
 }
 
 .file-drop input[type="file"] {
@@ -140,8 +158,14 @@ input[type="number"]:focus {
 }
 
 .file-drop-icon {
-  font-size: 1.4rem;
   margin-bottom: .25rem;
+  color: var(--muted);
+}
+
+.file-drop-icon svg {
+  width: 28px;
+  height: 28px;
+  stroke: var(--muted);
 }
 
 .file-drop-label {
@@ -156,6 +180,13 @@ input[type="number"]:focus {
   margin-top: .25rem;
   font-family: var(--mono);
   word-break: break-all;
+}
+
+.file-stats {
+  font-size: .72rem;
+  color: var(--muted);
+  margin-top: .3rem;
+  font-family: var(--mono);
 }
 
 /* Toggle */
@@ -199,9 +230,15 @@ input[type="checkbox"]:checked + .toggle-track::after { transform: translateX(15
 
 hr { border: none; border-top: 1px solid var(--border); margin: .9rem 0; }
 
-/* Run button */
+/* Run / Cancel buttons */
+.run-row {
+  display: flex;
+  gap: .6rem;
+  align-items: stretch;
+}
+
 .btn-run {
-  width: 100%;
+  flex: 1;
   padding: .7rem 1.2rem;
   background: var(--accent);
   color: #fff;
@@ -217,6 +254,22 @@ hr { border: none; border-top: 1px solid var(--border); margin: .9rem 0; }
 .btn-run:active { transform: scale(.98); }
 .btn-run:disabled { opacity: .5; cursor: not-allowed; }
 
+.btn-cancel {
+  flex: 0 0 auto;
+  padding: .7rem 1.2rem;
+  background: var(--surface);
+  color: var(--red);
+  border: 1.5px solid var(--red);
+  border-radius: 8px;
+  font-size: .95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, color .15s, transform .1s;
+}
+
+.btn-cancel:hover { background: rgba(220,38,38,.08); }
+.btn-cancel:active { transform: scale(.98); }
+
 /* Progress */
 #progress-section {
   margin-top: 1.25rem;
@@ -225,21 +278,40 @@ hr { border: none; border-top: 1px solid var(--border); margin: .9rem 0; }
 .progress-bar-wrap {
   background: var(--border);
   border-radius: 99px;
-  height: 6px;
+  height: 8px;
   overflow: hidden;
   margin-bottom: .5rem;
 }
 
 .progress-bar-fill {
   height: 100%;
-  background: var(--accent);
   border-radius: 99px;
   transition: width .2s;
   width: 0%;
+  background: linear-gradient(90deg, var(--accent) 0%, #93c5fd 50%, var(--accent) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.progress-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .progress-label {
   font-size: .78rem;
+  color: var(--muted);
+}
+
+.progress-elapsed {
+  font-size: .78rem;
+  font-family: var(--mono);
   color: var(--muted);
 }
 
@@ -265,6 +337,59 @@ hr { border: none; border-top: 1px solid var(--border); margin: .9rem 0; }
   color: var(--accent);
 }
 
+.controls-row {
+  display: flex;
+  gap: .5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.sort-row {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  font-size: .78rem;
+  color: var(--muted);
+}
+
+.sort-row select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: .25rem .5rem;
+  font-size: .78rem;
+  color: var(--text);
+  outline: none;
+  cursor: pointer;
+}
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  font-size: .78rem;
+  color: var(--muted);
+}
+
+.filter-row input[type="range"] {
+  width: 90px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.filter-value {
+  font-family: var(--mono);
+  font-size: .75rem;
+  min-width: 3em;
+  color: var(--text);
+}
+
+.filter-count {
+  font-size: .72rem;
+  color: var(--muted);
+  margin-left: .2rem;
+}
+
 .btn-export {
   padding: .35rem .85rem;
   border: 1px solid var(--border);
@@ -277,7 +402,7 @@ hr { border: none; border-top: 1px solid var(--border); margin: .9rem 0; }
   transition: background .15s, color .15s;
 }
 
-.btn-export:hover { background: #f1f3f6; color: var(--text); }
+.btn-export:hover { background: var(--surface2); color: var(--text); }
 
 /* Match cards */
 .match-list {
@@ -292,6 +417,12 @@ hr { border: none; border-top: 1px solid var(--border); margin: .9rem 0; }
   border-radius: var(--radius);
   box-shadow: 0 1px 3px rgba(0,0,0,.05);
   overflow: hidden;
+  transition: box-shadow .15s, transform .15s;
+}
+
+.match-card:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,.1);
+  transform: translateY(-1px);
 }
 
 .match-header {
@@ -300,7 +431,7 @@ hr { border: none; border-top: 1px solid var(--border); margin: .9rem 0; }
   gap: .75rem;
   padding: .7rem 1rem;
   border-bottom: 1px solid var(--border);
-  background: #fafbfc;
+  background: var(--surface2);
   flex-wrap: wrap;
 }
 
@@ -382,7 +513,7 @@ hr { border: none; border-top: 1px solid var(--border); margin: .9rem 0; }
   position: absolute;
   bottom: 0; left: 0; right: 0;
   height: 40px;
-  background: linear-gradient(transparent, white);
+  background: linear-gradient(transparent, var(--surface));
   pointer-events: none;
 }
 
@@ -404,8 +535,8 @@ hr { border: none; border-top: 1px solid var(--border); margin: .9rem 0; }
 .hidden { display: none !important; }
 
 .error-msg {
-  background: #fef2f2;
-  border: 1px solid #fecaca;
+  background: rgba(220,38,38,.06);
+  border: 1px solid rgba(220,38,38,.2);
   border-radius: 8px;
   padding: .75rem 1rem;
   font-size: .83rem;
@@ -419,26 +550,6 @@ input.invalid {
 }
 
 .hint { font-size: .7rem; color: var(--red); margin-top: .25rem; }
-
-/* Sort controls */
-.sort-row {
-  display: flex;
-  align-items: center;
-  gap: .5rem;
-  font-size: .78rem;
-  color: var(--muted);
-}
-
-.sort-row select {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: .25rem .5rem;
-  font-size: .78rem;
-  color: var(--text);
-  outline: none;
-  cursor: pointer;
-}
 </style>
 </head>
 <body>
@@ -458,9 +569,10 @@ input.invalid {
       <label>File 1</label>
       <div class="file-drop" id="drop1">
         <input type="file" id="file1-input" accept="text/*">
-        <div class="file-drop-icon">📄</div>
+        <div class="file-drop-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></div>
         <div class="file-drop-label">Click or drag file here</div>
         <div class="file-drop-name hidden" id="file1-name"></div>
+        <div class="file-stats hidden" id="file1-stats"></div>
       </div>
     </div>
 
@@ -468,9 +580,10 @@ input.invalid {
       <label>File 2</label>
       <div class="file-drop" id="drop2">
         <input type="file" id="file2-input" accept="text/*">
-        <div class="file-drop-icon">📄</div>
+        <div class="file-drop-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></div>
         <div class="file-drop-label">Click or drag file here</div>
         <div class="file-drop-name hidden" id="file2-name"></div>
+        <div class="file-stats hidden" id="file2-stats"></div>
       </div>
     </div>
   </div>
@@ -513,11 +626,19 @@ input.invalid {
       <label>Chunk size <span class="flag">--chunk-size</span> <span class="default">5000 alpha chars</span></label>
       <input type="number" id="chunk_size" min="100" placeholder="5000" value="5000">
     </div>
+
+    <div class="field">
+      <label>Max results <span class="flag">--max-results</span> <span class="default">0 = no limit</span></label>
+      <input type="number" id="max_results" min="0" placeholder="0" value="0">
+    </div>
   </div>
 
   <!-- Run -->
   <div class="card full-width">
-    <button class="btn-run" id="btn-run" disabled>Select both files to begin</button>
+    <div class="run-row">
+      <button class="btn-run" id="btn-run" disabled>Select both files to begin</button>
+      <button class="btn-cancel hidden" id="btn-cancel">Stop</button>
+    </div>
     <div id="error-area"></div>
   </div>
 
@@ -530,7 +651,10 @@ input.invalid {
     <div class="progress-bar-wrap">
       <div class="progress-bar-fill" id="progress-fill"></div>
     </div>
-    <div class="progress-label" id="progress-label">Starting…</div>
+    <div class="progress-row">
+      <div class="progress-label" id="progress-label">Starting…</div>
+      <div class="progress-elapsed" id="progress-elapsed"></div>
+    </div>
   </div>
 </div>
 
@@ -538,7 +662,13 @@ input.invalid {
 <div id="results-section" class="hidden">
   <div class="results-header">
     <div class="results-stat" id="results-stat"></div>
-    <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">
+    <div class="controls-row">
+      <div class="filter-row">
+        Min:
+        <input type="range" min="0" max="100" value="0" step="1" id="filter-slider">
+        <span class="filter-value" id="filter-value">0%</span>
+        <span class="filter-count" id="filter-count"></span>
+      </div>
       <div class="sort-row">
         Sort:
         <select id="sort-select">
@@ -548,6 +678,7 @@ input.invalid {
           <option value="len-desc">Length ↓</option>
         </select>
       </div>
+      <button class="btn-export" id="btn-export-jsonl">Export JSONL</button>
       <button class="btn-export" id="btn-export-json">Export JSON</button>
       <button class="btn-export" id="btn-export-csv">Export CSV</button>
     </div>
@@ -559,32 +690,50 @@ input.invalid {
 // ── State ──────────────────────────────────────────────────────────────────
 let text1 = null, text2 = null;
 let file1Name = '', file2Name = '';
-let results = []; // sorted, deduplicated match records
+let results = [];       // all deduplicated match records
+let filteredResults = []; // after similarity filter
+let cancelled = false;
+let hasRun = false;
+let timerInterval = null;
+let runStartTime = 0;
 
 // ── File loading ───────────────────────────────────────────────────────────
-function setupFileDrop(dropEl, inputEl, nameEl, slot) {
+function setupFileDrop(dropEl, inputEl, nameEl, statsEl, slot) {
   inputEl.addEventListener('change', () => {
-    if (inputEl.files[0]) loadFile(inputEl.files[0], nameEl, slot);
+    if (inputEl.files[0]) loadFile(inputEl.files[0], nameEl, statsEl, slot);
   });
   dropEl.addEventListener('dragover', e => { e.preventDefault(); dropEl.classList.add('drag-over'); });
   dropEl.addEventListener('dragleave', () => dropEl.classList.remove('drag-over'));
   dropEl.addEventListener('drop', e => {
     e.preventDefault();
     dropEl.classList.remove('drag-over');
-    if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0], nameEl, slot);
+    if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0], nameEl, statsEl, slot);
   });
 }
 
-function loadFile(file, nameEl, slot) {
+function loadFile(file, nameEl, statsEl, slot) {
   const reader = new FileReader();
   reader.onload = e => {
-    if (slot === 1) { text1 = e.target.result; file1Name = file.name; }
-    else            { text2 = e.target.result; file2Name = file.name; }
+    const content = e.target.result;
+    if (slot === 1) { text1 = content; file1Name = file.name; }
+    else            { text2 = content; file2Name = file.name; }
     nameEl.textContent = file.name + ' (' + fmtSize(file.size) + ')';
     nameEl.classList.remove('hidden');
+
+    // Show file stats
+    const alphaCount = countAlpha(content);
+    statsEl.textContent = fmtNum(content.length) + ' chars \u00b7 ' + fmtNum(alphaCount) + ' alpha';
+    statsEl.classList.remove('hidden');
+
     updateRunBtn();
   };
   reader.readAsText(file, 'utf-8');
+}
+
+function countAlpha(text) {
+  let n = 0;
+  for (const ch of text) { if (/\p{L}/u.test(ch)) n++; }
+  return n;
 }
 
 function fmtSize(n) {
@@ -593,27 +742,40 @@ function fmtSize(n) {
   return (n / 1048576).toFixed(1) + ' MB';
 }
 
+function fmtNum(n) { return n.toLocaleString(); }
+
 setupFileDrop(
   document.getElementById('drop1'),
   document.getElementById('file1-input'),
-  document.getElementById('file1-name'), 1
+  document.getElementById('file1-name'),
+  document.getElementById('file1-stats'), 1
 );
 setupFileDrop(
   document.getElementById('drop2'),
   document.getElementById('file2-input'),
-  document.getElementById('file2-name'), 2
+  document.getElementById('file2-name'),
+  document.getElementById('file2-stats'), 2
 );
 
 function updateRunBtn() {
   const btn = document.getElementById('btn-run');
   if (text1 && text2) {
     btn.disabled = false;
-    btn.textContent = 'Find similar strings';
+    btn.textContent = hasRun ? 'Run again' : 'Find similar strings';
   } else {
     btn.disabled = true;
     btn.textContent = 'Select both files to begin';
   }
 }
+
+// Mark params as changed after a run
+['min_len','max_len','threshold','chunk_size','max_results','no_ignore_non_alpha'].forEach(id => {
+  document.getElementById(id).addEventListener('change', () => {
+    if (hasRun && text1 && text2) {
+      document.getElementById('btn-run').textContent = 'Re-run with new parameters';
+    }
+  });
+});
 
 // ── Algorithm ──────────────────────────────────────────────────────────────
 
@@ -621,7 +783,7 @@ function buildAlphaView(text) {
   let alphaText = '';
   const alphaToChar = [];
   let i = 0;
-  for (const ch of text) {        // iterates code points correctly
+  for (const ch of text) {
     if (/\p{L}/u.test(ch)) {
       alphaText += ch;
       alphaToChar.push(i);
@@ -631,7 +793,6 @@ function buildAlphaView(text) {
   return { alphaText, alphaToChar };
 }
 
-// Build b2j index once for a given string
 function buildB2J(b) {
   const b2j = new Map();
   for (let j = 0; j < b.length; j++) {
@@ -642,7 +803,6 @@ function buildB2J(b) {
   return b2j;
 }
 
-// Python difflib find_longest_match equivalent
 function findLongestMatch(a, b, alo, ahi, blo, bhi, b2j) {
   let bestI = alo, bestJ = blo, bestSize = 0;
   let j2len = {};
@@ -651,7 +811,7 @@ function findLongestMatch(a, b, alo, ahi, blo, bhi, b2j) {
     const newj2len = {};
     for (const j of (b2j.get(a[i]) || [])) {
       if (j < blo) continue;
-      if (j >= bhi) break;         // b2j entries are sorted
+      if (j >= bhi) break;
       const k = (j2len[j - 1] || 0) + 1;
       newj2len[j] = k;
       if (k > bestSize) {
@@ -665,7 +825,6 @@ function findLongestMatch(a, b, alo, ahi, blo, bhi, b2j) {
   return [bestI, bestJ, bestSize];
 }
 
-// Python difflib get_matching_blocks equivalent
 function getMatchingBlocks(a, b, b2j) {
   const queue = [[0, a.length, 0, b.length]];
   const matching = [];
@@ -681,11 +840,10 @@ function getMatchingBlocks(a, b, b2j) {
   }
 
   matching.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
-  matching.push([a.length, b.length, 0]);  // sentinel
+  matching.push([a.length, b.length, 0]);
   return matching;
 }
 
-// Port of find_parallel_regions_local
 function findParallelRegions(slice1, alpha2, threshold, minLen, maxLen, b2j) {
   const blocks = getMatchingBlocks(slice1, alpha2, b2j);
   const regions = [];
@@ -750,6 +908,7 @@ async function run() {
   const minLen     = parseInt(document.getElementById('min_len').value)       || 100;
   const maxLen     = parseInt(document.getElementById('max_len').value)       || 0;
   const chunkSize  = parseInt(document.getElementById('chunk_size').value)    || 5000;
+  const maxResults = parseInt(document.getElementById('max_results').value)   || 0;
   const ignoreNonAlpha = !document.getElementById('no_ignore_non_alpha').checked;
 
   // Validate
@@ -759,7 +918,7 @@ async function run() {
     showError('Threshold must be between 0 (exclusive) and 1.'); return;
   }
   if (maxLen > 0 && maxLen < minLen) {
-    showError('Max length must be ≥ min length.'); return;
+    showError('Max length must be \u2265 min length.'); return;
   }
 
   // Build views
@@ -778,9 +937,12 @@ async function run() {
   const b2j = buildB2J(a2.alphaText);
 
   // Process chunks
-  const rawRegions = []; // {charStart1, charEnd1, charStart2, charEnd2, sim}
+  const rawRegions = [];
+  let chunksProcessed = 0;
 
   for (let ci = 0; ci < chunks.length; ci++) {
+    if (cancelled) break;
+
     const [chunkStart, chunkEnd] = chunks[ci];
     const slice1 = a1.alphaText.slice(chunkStart, chunkEnd);
 
@@ -799,20 +961,33 @@ async function run() {
       rawRegions.push({ charS1, charE1, charS2, charE2, sim });
     }
 
-    showProgress((ci + 1) / chunks.length, `${ci + 1} / ${chunks.length} chunks — ${rawRegions.length} raw matches`);
+    chunksProcessed = ci + 1;
+    showProgress(chunksProcessed / chunks.length, `${chunksProcessed} / ${chunks.length} chunks \u2014 ${rawRegions.length} raw matches`);
 
-    // Yield to browser every chunk so UI stays responsive
     await yieldToBrowser();
   }
 
-  // Deduplicate (keep max similarity per unique span)
+  if (cancelled) {
+    setRunning(false);
+    document.getElementById('progress-section').classList.remove('hidden');
+    showProgress(chunksProcessed / chunks.length,
+      `Stopped after ${chunksProcessed} / ${chunks.length} chunks \u2014 ${rawRegions.length} raw matches`);
+    if (rawRegions.length === 0) return;
+  }
+
+  // Deduplicate
   const regionMap = new Map();
   for (const r of rawRegions) {
     const key = `${r.charS1},${r.charE1},${r.charS2},${r.charE2}`;
     if (!regionMap.has(key) || regionMap.get(key).sim < r.sim) regionMap.set(key, r);
   }
 
-  results = [...regionMap.values()].map(r => ({
+  let deduped = [...regionMap.values()];
+  if (maxResults > 0 && deduped.length > maxResults) {
+    deduped = deduped.slice(0, maxResults);
+  }
+
+  results = deduped.map(r => ({
     start1:     r.charS1,
     end1:       r.charE1,
     start2:     r.charS2,
@@ -824,8 +999,15 @@ async function run() {
   }));
 
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-  setRunning(false);
-  renderResults(results, elapsed);
+  if (!cancelled) setRunning(false);
+  hasRun = true;
+  updateRunBtn();
+
+  // Reset filter slider
+  document.getElementById('filter-slider').value = 0;
+  document.getElementById('filter-value').textContent = '0%';
+
+  renderResults(results, elapsed, cancelled);
 }
 
 function identityView(text) {
@@ -843,9 +1025,25 @@ function yieldToBrowser() {
 
 function setRunning(running) {
   const btn = document.getElementById('btn-run');
+  const cancelBtn = document.getElementById('btn-cancel');
   btn.disabled = running;
-  btn.textContent = running ? 'Processing…' : 'Find similar strings';
+  btn.textContent = running ? 'Processing\u2026' : (hasRun ? 'Run again' : 'Find similar strings');
+  cancelBtn.classList.toggle('hidden', !running);
   document.getElementById('progress-section').classList.toggle('hidden', !running);
+  if (running) {
+    cancelled = false;
+    runStartTime = Date.now();
+    timerInterval = setInterval(updateElapsed, 100);
+  } else {
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+}
+
+function updateElapsed() {
+  const el = document.getElementById('progress-elapsed');
+  const sec = ((Date.now() - runStartTime) / 1000).toFixed(1);
+  el.textContent = sec + 's';
 }
 
 function showProgress(frac, label) {
@@ -862,13 +1060,24 @@ function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-// ── Results rendering ──────────────────────────────────────────────────────
+// ── Similarity color ───────────────────────────────────────────────────────
+
+function lerp(a, b, t) { return Math.round(a + (b - a) * t); }
 
 function simColor(s) {
-  // Maps 0..1 → red(0°) to green(120°) in HSL, saturated
-  const h = Math.round(s * 120);
-  return `hsl(${h},70%,35%)`;
+  // Red → orange → green with no muddy yellow
+  let r, g, b;
+  if (s < 0.5) {
+    const t = s * 2;
+    r = lerp(220, 234, t); g = lerp(38, 88, t); b = lerp(38, 12, t);
+  } else {
+    const t = (s - 0.5) * 2;
+    r = lerp(234, 22, t); g = lerp(88, 163, t); b = lerp(12, 74, t);
+  }
+  return `rgb(${r},${g},${b})`;
 }
+
+// ── Results rendering ──────────────────────────────────────────────────────
 
 function sortResults(arr, mode) {
   const copy = [...arr];
@@ -879,14 +1088,29 @@ function sortResults(arr, mode) {
   return copy;
 }
 
-function renderResults(data, elapsed) {
+function applyFilter() {
+  const pct = parseInt(document.getElementById('filter-slider').value);
+  const minSim = pct / 100;
+  document.getElementById('filter-value').textContent = pct + '%';
+  filteredResults = results.filter(m => m.similarity >= minSim);
+  const countEl = document.getElementById('filter-count');
+  countEl.textContent = filteredResults.length < results.length
+    ? `(${filteredResults.length}/${results.length})`
+    : '';
+  const mode = document.getElementById('sort-select').value;
+  renderMatchList(sortResults(filteredResults, mode));
+}
+
+function renderResults(data, elapsed, partial) {
   document.getElementById('progress-section').classList.add('hidden');
   const section = document.getElementById('results-section');
   section.classList.remove('hidden');
 
   const stat = document.getElementById('results-stat');
-  stat.innerHTML = `<span>${data.length}</span> match${data.length !== 1 ? 'es' : ''} found in ${elapsed}s`;
+  const suffix = partial ? ' (partial \u2014 stopped early)' : ` in ${elapsed}s`;
+  stat.innerHTML = `<span>${data.length}</span> match${data.length !== 1 ? 'es' : ''} found${suffix}`;
 
+  filteredResults = data;
   const mode = document.getElementById('sort-select').value;
   renderMatchList(sortResults(data, mode));
 }
@@ -900,7 +1124,7 @@ function renderMatchList(sorted) {
     return;
   }
 
-  for (const m of sorted) {
+  sorted.forEach((m, idx) => {
     const pct = (m.similarity * 100).toFixed(1) + '%';
     const color = simColor(m.similarity);
 
@@ -911,29 +1135,28 @@ function renderMatchList(sorted) {
       <div class="match-header">
         <span class="sim-badge" style="background:${escHtml(color)}">${escHtml(pct)}</span>
         <span class="match-pos">
-          file1 ${m.start1}–${m.end1} &nbsp;·&nbsp; file2 ${m.start2}–${m.end2}
+          file1 ${m.start1}\u2013${m.end1} &nbsp;\u00b7&nbsp; file2 ${m.start2}\u2013${m.end2}
         </span>
-        <span class="match-len">${m.spanLen} chars</span>
+        <span class="match-len">${fmtNum(m.spanLen)} chars</span>
       </div>
       <div class="match-body">
         <div class="match-panel">
           <div class="match-file-label">${escHtml(file1Name || 'File 1')}</div>
-          <div class="match-text" id="mt1-${m.start1}-${m.start2}">${escHtml(m.text1)}</div>
-          <button class="btn-expand hidden" data-target="mt1-${m.start1}-${m.start2}">Show more</button>
+          <div class="match-text" id="mt1-${idx}">${escHtml(m.text1)}</div>
+          <button class="btn-expand hidden" data-target="mt1-${idx}">Show more</button>
         </div>
         <div class="match-panel">
           <div class="match-file-label">${escHtml(file2Name || 'File 2')}</div>
-          <div class="match-text" id="mt2-${m.start1}-${m.start2}">${escHtml(m.text2)}</div>
-          <button class="btn-expand hidden" data-target="mt2-${m.start1}-${m.start2}">Show more</button>
+          <div class="match-text" id="mt2-${idx}">${escHtml(m.text2)}</div>
+          <button class="btn-expand hidden" data-target="mt2-${idx}">Show more</button>
         </div>
       </div>
     `;
 
     list.appendChild(card);
 
-    // Show "expand" buttons only when text is actually overflowing
     requestAnimationFrame(() => {
-      for (const panelId of [`mt1-${m.start1}-${m.start2}`, `mt2-${m.start1}-${m.start2}`]) {
+      for (const panelId of [`mt1-${idx}`, `mt2-${idx}`]) {
         const el = document.getElementById(panelId);
         if (!el) continue;
         if (el.scrollHeight > el.clientHeight + 2) {
@@ -942,40 +1165,51 @@ function renderMatchList(sorted) {
         }
       }
     });
-  }
+  });
 
-  // Expand buttons
-  list.addEventListener('click', e => {
+  // Expand buttons (event delegation)
+  list.onclick = e => {
     if (!e.target.classList.contains('btn-expand')) return;
     const target = document.getElementById(e.target.dataset.target);
     if (!target) return;
     target.classList.toggle('expanded');
     e.target.textContent = target.classList.contains('expanded') ? 'Show less' : 'Show more';
-  });
+  };
 }
 
-// Re-sort without rerunning
+// Re-sort / re-filter
 document.getElementById('sort-select').addEventListener('change', () => {
-  if (results.length > 0) renderMatchList(sortResults(results, document.getElementById('sort-select').value));
+  if (filteredResults.length > 0) renderMatchList(sortResults(filteredResults, document.getElementById('sort-select').value));
 });
+
+document.getElementById('filter-slider').addEventListener('input', applyFilter);
 
 // ── Export ─────────────────────────────────────────────────────────────────
 
-document.getElementById('btn-export-json').addEventListener('click', () => {
-  const data = results.map(m => ({
+function exportRecord(m) {
+  return {
     file1: file1Name, start1: m.start1, end1: m.end1,
     file2: file2Name, start2: m.start2, end2: m.end2,
     similarity: Math.round(m.similarity * 100000) / 100000,
     span_length_chars: m.spanLen,
     text1: m.text1, text2: m.text2,
-  }));
+  };
+}
+
+document.getElementById('btn-export-jsonl').addEventListener('click', () => {
+  const lines = filteredResults.map(m => JSON.stringify(exportRecord(m)));
+  download('matches.jsonl', lines.join('\n') + '\n', 'application/x-ndjson');
+});
+
+document.getElementById('btn-export-json').addEventListener('click', () => {
+  const data = filteredResults.map(exportRecord);
   download('matches.json', JSON.stringify(data, null, 2), 'application/json');
 });
 
 document.getElementById('btn-export-csv').addEventListener('click', () => {
   const fields = ['file1','start1','end1','file2','start2','end2','similarity','span_length_chars','text1','text2'];
   const rows = [fields.join(',')];
-  for (const m of results) {
+  for (const m of filteredResults) {
     rows.push([
       csvCell(file1Name), m.start1, m.end1,
       csvCell(file2Name), m.start2, m.end2,
@@ -1002,7 +1236,11 @@ function download(filename, content, type) {
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
 
-// ── Run button ─────────────────────────────────────────────────────────────
+// ── Run / Cancel / Keyboard ────────────────────────────────────────────────
+
+document.getElementById('btn-cancel').addEventListener('click', () => {
+  cancelled = true;
+});
 
 document.getElementById('btn-run').addEventListener('click', () => {
   if (!text1 || !text2) return;
@@ -1013,6 +1251,18 @@ document.getElementById('btn-run').addEventListener('click', () => {
     showError('Error: ' + err.message);
     console.error(err);
   });
+});
+
+// Enter key to start
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
+    const tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' && e.target.type === 'number') {
+      e.preventDefault();
+      const btn = document.getElementById('btn-run');
+      if (!btn.disabled) btn.click();
+    }
+  }
 });
 </script>
 </body>

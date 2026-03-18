@@ -15,6 +15,15 @@ python find_similar_strings.py file1.txt file2.txt
 # Run with all options
 python find_similar_strings.py file1.txt file2.txt -o out.jsonl -t 0.85 -n 200 -j 4
 
+# Fast mode (autojunk heuristic, may miss some matches)
+python find_similar_strings.py file1.txt file2.txt --fast
+
+# Quiet mode (no progress bar or summary on stderr)
+python find_similar_strings.py file1.txt file2.txt -q
+
+# Limit output to top 50 results
+python find_similar_strings.py file1.txt file2.txt --max-results 50
+
 # SQLite output (requires -o)
 python find_similar_strings.py file1.txt file2.txt --format sqlite -o matches.db
 
@@ -26,7 +35,7 @@ There are no tests or linting configured in this project.
 
 ## Architecture
 
-The entire tool is a single file: `find_similar_strings.py`. `gui.html` is a standalone browser-based command builder (no server needed).
+The entire tool is a single file: `find_similar_strings.py`. `gui.html` is a standalone browser-based command builder (no server needed). `app.html` is a browser-native implementation that runs the matching algorithm entirely in JavaScript (no Python required).
 
 ### Processing pipeline
 
@@ -42,11 +51,11 @@ There are three parallel index spaces maintained for each file:
 - **char indices** — positions in the decoded Python `str`
 - **alpha indices** — positions in the letter-only filtered string
 
-Matching happens in alpha-index space. Results are mapped back: alpha → char (via `GLOBAL_ALPHA_TO_CHAR*`) → byte (via `GLOBAL_CHAR_TO_BYTE*`). When `--no-ignore-non-alpha` is used, alpha and char spaces are identical (identity mapping).
+Matching happens in alpha-index space. Results are mapped back: alpha → char (via `GLOBAL_ALPHA_TO_CHAR*`) → byte (via `GLOBAL_CHAR_TO_BYTE*`). When `--no-ignore-non-alpha` is used, alpha and char spaces are identical (`IdentityList` — zero-allocation identity mapping).
 
 ### Output writers
 
-Four writer classes (`JsonlWriter`, `JsonWriter`, `SqliteWriter`, `CsvWriter`) share a `writerow(record)` / `finalize(records)` interface. JSONL and CSV are streaming; JSON buffers all records for `finalize()`. SQLite commits in `finalize()`.
+Four writer classes (`JsonlWriter`, `JsonWriter`, `SqliteWriter`, `CsvWriter`) share a `writerow(record)` / `finalize(records)` interface. JSONL and CSV are streaming; JSON buffers all records for `finalize()`. SQLite batches inserts (1000 rows at a time via `executemany`) and commits in `finalize()`.
 
 ### Chunking with overlap
 
