@@ -12,6 +12,7 @@ Uses chunked multiprocess [`difflib`](https://docs.python.org/3/library/difflib.
 - Chunked comparison with overlap to avoid missing cross-boundary matches
 - Progress bar (via tqdm) on stderr, clean output on stdout or a file
 - HTML command builder (`gui.html`) — compose commands in a browser, no typing required
+- Browser-native implementation (`app.html`) — runs the full matching algorithm in JavaScript, no Python required
 
 ## Requirements
 
@@ -31,6 +32,7 @@ usage: find_similar_strings.py [-h] [--version] [-o OUTPUT] [--format {jsonl,jso
                                [-n MIN_LEN] [--max-len MAX_LEN] [-t THRESHOLD] [-j JOBS]
                                [--chunk-size CHUNK_SIZE] [--overlap OVERLAP]
                                [--use-rapidfuzz] [--no-ignore-non-alpha]
+                               [--fast] [--max-results MAX_RESULTS] [-q]
                                file1 file2
 ```
 
@@ -49,6 +51,9 @@ usage: find_similar_strings.py [-h] [--version] [-o OUTPUT] [--format {jsonl,jso
 | `--overlap` | max(2×min_len, 100) | Overlap between chunks |
 | `--use-rapidfuzz` | off | Re-score with RapidFuzz; reject if below threshold |
 | `--no-ignore-non-alpha` | off | Use full text instead of letters only |
+| `--fast` | off | Enable difflib autojunk heuristic for faster matching (may miss some matches) |
+| `--max-results` | 0 (no limit) | Maximum number of results to output |
+| `-q`, `--quiet` | off | Suppress progress bar and summary output on stderr |
 
 ### Examples
 
@@ -73,6 +78,15 @@ python find_similar_strings.py doc1.txt doc2.txt --use-rapidfuzz -j 4
 
 # Include punctuation/digits in matching
 python find_similar_strings.py doc1.txt doc2.txt --no-ignore-non-alpha
+
+# Fast mode (autojunk heuristic, may miss some matches)
+python find_similar_strings.py doc1.txt doc2.txt --fast
+
+# Quiet mode (no progress bar or summary on stderr)
+python find_similar_strings.py doc1.txt doc2.txt -q
+
+# Limit output to top 50 results
+python find_similar_strings.py doc1.txt doc2.txt --max-results 50
 ```
 
 ## Output formats
@@ -99,6 +113,10 @@ python find_similar_strings.py doc1.txt doc2.txt --no-ignore-non-alpha
 ## GUI
 
 Open `gui.html` in any browser to compose the command interactively. The command preview updates live as you fill in the form.
+
+## Browser app
+
+Open `app.html` in any browser to run the matching algorithm entirely in JavaScript — no Python or server needed. Drag and drop two files, adjust parameters, and view results inline.
 
 ## How it works
 
