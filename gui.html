@@ -154,6 +154,75 @@
     }
   }
 
+  /* File drop zone */
+  .file-drop-wrap {
+    position: relative;
+  }
+
+  .file-drop-wrap .drop-overlay {
+    display: none;
+    position: absolute;
+    inset: 0;
+    border: 2px dashed var(--accent);
+    border-radius: 6px;
+    background: rgba(37,99,235,.08);
+    z-index: 2;
+    pointer-events: none;
+    align-items: center;
+    justify-content: center;
+    font-size: .78rem;
+    color: var(--accent);
+    font-weight: 500;
+  }
+
+  .file-drop-wrap.drag-over .drop-overlay {
+    display: flex;
+  }
+
+  .file-drop-wrap input[type="text"] {
+    padding-right: 2.2rem;
+  }
+
+  .file-browse-btn {
+    position: absolute;
+    right: 1px;
+    top: 1px;
+    bottom: 1px;
+    width: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface2);
+    border: none;
+    border-left: 1px solid var(--border);
+    border-radius: 0 5px 5px 0;
+    cursor: pointer;
+    color: var(--muted);
+    transition: color .15s, background .15s;
+    padding: 0;
+  }
+
+  .file-browse-btn:hover {
+    color: var(--accent);
+    background: rgba(37,99,235,.06);
+  }
+
+  .file-browse-btn:active { transform: none; }
+
+  .file-browse-btn svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .file-stats {
+    font-size: .72rem;
+    color: var(--muted);
+    margin-top: .3rem;
+    font-family: var(--mono);
+  }
+
+  .file-stats.hidden { display: none; }
+
   /* Toggle switch */
   .toggle-field {
     display: flex;
@@ -443,12 +512,24 @@
 
     <div class="field">
       <label>File 1 <span class="flag">file1</span></label>
-      <input type="text" id="file1" placeholder="/path/to/first_file.txt">
+      <div class="file-drop-wrap" id="drop-wrap1">
+        <div class="drop-overlay">Drop file here</div>
+        <input type="text" id="file1" placeholder="Drop file or type path">
+        <button class="file-browse-btn" type="button" title="Browse…" data-file-input="file1-hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></button>
+        <input type="file" id="file1-hidden" accept="text/*" style="display:none">
+      </div>
+      <div class="file-stats hidden" id="file1-stats"></div>
     </div>
 
     <div class="field">
       <label>File 2 <span class="flag">file2</span></label>
-      <input type="text" id="file2" placeholder="/path/to/second_file.txt">
+      <div class="file-drop-wrap" id="drop-wrap2">
+        <div class="drop-overlay">Drop file here</div>
+        <input type="text" id="file2" placeholder="Drop file or type path">
+        <button class="file-browse-btn" type="button" title="Browse…" data-file-input="file2-hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></button>
+        <input type="file" id="file2-hidden" accept="text/*" style="display:none">
+      </div>
+      <div class="file-stats hidden" id="file2-stats"></div>
     </div>
 
     <div class="field">
@@ -882,6 +963,51 @@
       // ignore malformed hash
     }
   }
+
+  // ── File drop / browse ────────────────────────────────────────────────
+  function fmtSize(n) {
+    if (n < 1024) return n + ' B';
+    if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+    return (n / 1048576).toFixed(1) + ' MB';
+  }
+
+  function setupFileDrop(wrapId, inputId, statsId) {
+    const wrap = document.getElementById(wrapId);
+    const input = document.getElementById(inputId);
+    const stats = document.getElementById(statsId);
+    const hiddenInput = wrap.querySelector('input[type="file"]');
+    const browseBtn = wrap.querySelector('.file-browse-btn');
+
+    function handleFile(file) {
+      // Populate the text input with the filename (user can edit to full path)
+      if (!input.value.trim()) {
+        input.value = file.name;
+      }
+      stats.textContent = file.name + ' \u00b7 ' + fmtSize(file.size);
+      stats.classList.remove('hidden');
+      onFormChange();
+    }
+
+    // Drag & drop
+    wrap.addEventListener('dragover', e => { e.preventDefault(); wrap.classList.add('drag-over'); });
+    wrap.addEventListener('dragleave', e => {
+      if (!wrap.contains(e.relatedTarget)) wrap.classList.remove('drag-over');
+    });
+    wrap.addEventListener('drop', e => {
+      e.preventDefault();
+      wrap.classList.remove('drag-over');
+      if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+    });
+
+    // Browse button
+    browseBtn.addEventListener('click', () => hiddenInput.click());
+    hiddenInput.addEventListener('change', () => {
+      if (hiddenInput.files[0]) handleFile(hiddenInput.files[0]);
+    });
+  }
+
+  setupFileDrop('drop-wrap1', 'file1', 'file1-stats');
+  setupFileDrop('drop-wrap2', 'file2', 'file2-stats');
 
   loadHash();
   build();

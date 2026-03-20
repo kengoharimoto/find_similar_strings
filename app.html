@@ -59,12 +59,20 @@ h1 {
 
 .layout {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: 1fr 1fr;
   gap: 1rem;
   align-items: start;
 }
 
-.full-width { grid-column: 1 / -1; }
+@media (max-width: 700px) {
+  .layout { grid-template-columns: 1fr; }
+}
+
+.right-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
 
 .card {
   background: var(--surface);
@@ -588,58 +596,59 @@ input.invalid {
     </div>
   </div>
 
-  <!-- Matching params -->
-  <div class="card">
-    <div class="card-title">Matching</div>
+  <!-- Right column: Matching + Run -->
+  <div class="right-stack">
+    <div class="card">
+      <div class="card-title">Matching</div>
 
-    <div class="field-row">
-      <div class="field">
-        <label>Min length <span class="flag">-n</span> <span class="default">100</span></label>
-        <input type="number" id="min_len" min="1" placeholder="100" value="100">
+      <div class="field-row">
+        <div class="field">
+          <label>Min length <span class="flag">-n</span> <span class="default">100</span></label>
+          <input type="number" id="min_len" min="1" placeholder="100" value="100">
+        </div>
+        <div class="field">
+          <label>Max length <span class="flag">--max-len</span> <span class="default">0 = ∞</span></label>
+          <input type="number" id="max_len" min="0" placeholder="0" value="0">
+        </div>
       </div>
+
       <div class="field">
-        <label>Max length <span class="flag">--max-len</span> <span class="default">0 = ∞</span></label>
-        <input type="number" id="max_len" min="0" placeholder="0" value="0">
+        <label>Threshold <span class="flag">-t</span> <span class="default">0.0–1.0</span></label>
+        <input type="number" id="threshold" min="0.01" max="1" step="0.01" placeholder="0.8" value="0.8">
+        <div class="hint hidden" id="threshold-hint">Must be between 0 (exclusive) and 1.</div>
+      </div>
+
+      <hr>
+
+      <div class="field">
+        <label class="toggle-field" for="no_ignore_non_alpha">
+          <input type="checkbox" id="no_ignore_non_alpha">
+          <span class="toggle-track"></span>
+          <span>
+            <span class="toggle-label">Include punctuation &amp; digits</span>
+            <div class="toggle-desc">By default only alphabetic characters are matched.</div>
+          </span>
+        </label>
+      </div>
+
+      <div class="field">
+        <label>Chunk size <span class="flag">--chunk-size</span> <span class="default">5000 alpha chars</span></label>
+        <input type="number" id="chunk_size" min="100" placeholder="5000" value="5000">
+      </div>
+
+      <div class="field">
+        <label>Max results <span class="flag">--max-results</span> <span class="default">0 = no limit</span></label>
+        <input type="number" id="max_results" min="0" placeholder="0" value="0">
       </div>
     </div>
 
-    <div class="field">
-      <label>Threshold <span class="flag">-t</span> <span class="default">0.0–1.0</span></label>
-      <input type="number" id="threshold" min="0.01" max="1" step="0.01" placeholder="0.8" value="0.8">
-      <div class="hint hidden" id="threshold-hint">Must be between 0 (exclusive) and 1.</div>
+    <div class="card">
+      <div class="run-row">
+        <button class="btn-run" id="btn-run" disabled>Select both files to begin</button>
+        <button class="btn-cancel hidden" id="btn-cancel">Stop</button>
+      </div>
+      <div id="error-area"></div>
     </div>
-
-    <hr>
-
-    <div class="field">
-      <label class="toggle-field" for="no_ignore_non_alpha">
-        <input type="checkbox" id="no_ignore_non_alpha">
-        <span class="toggle-track"></span>
-        <span>
-          <span class="toggle-label">Include punctuation &amp; digits</span>
-          <div class="toggle-desc">By default only alphabetic characters are matched.</div>
-        </span>
-      </label>
-    </div>
-
-    <div class="field">
-      <label>Chunk size <span class="flag">--chunk-size</span> <span class="default">5000 alpha chars</span></label>
-      <input type="number" id="chunk_size" min="100" placeholder="5000" value="5000">
-    </div>
-
-    <div class="field">
-      <label>Max results <span class="flag">--max-results</span> <span class="default">0 = no limit</span></label>
-      <input type="number" id="max_results" min="0" placeholder="0" value="0">
-    </div>
-  </div>
-
-  <!-- Run -->
-  <div class="card full-width">
-    <div class="run-row">
-      <button class="btn-run" id="btn-run" disabled>Select both files to begin</button>
-      <button class="btn-cancel hidden" id="btn-cancel">Stop</button>
-    </div>
-    <div id="error-area"></div>
   </div>
 
 </div>
@@ -779,26 +788,36 @@ function updateRunBtn() {
 
 // ── Algorithm ──────────────────────────────────────────────────────────────
 
-function buildAlphaView(text) {
-  let alphaText = '';
+async function buildAlphaView(text) {
+  const chunks = [];
   const alphaToChar = [];
   let i = 0;
+  let since = 0;
   for (const ch of text) {
     if (/\p{L}/u.test(ch)) {
-      alphaText += ch;
+      chunks.push(ch);
       alphaToChar.push(i);
     }
     i += ch.length;
+    if (++since >= 50000) {
+      since = 0;
+      if (cancelled) break;
+      await yieldToBrowser();
+    }
   }
-  return { alphaText, alphaToChar };
+  return { alphaText: chunks.join(''), alphaToChar };
 }
 
-function buildB2J(b) {
+async function buildB2J(b) {
   const b2j = new Map();
   for (let j = 0; j < b.length; j++) {
     const c = b[j];
     if (!b2j.has(c)) b2j.set(c, []);
     b2j.get(c).push(j);
+    if (j % 50000 === 0 && j > 0) {
+      if (cancelled) break;
+      await yieldToBrowser();
+    }
   }
   return b2j;
 }
@@ -921,20 +940,31 @@ async function run() {
     showError('Max length must be \u2265 min length.'); return;
   }
 
-  // Build views
+  // Show progress immediately so the user sees feedback
   const t0 = Date.now();
-  const a1 = ignoreNonAlpha ? buildAlphaView(text1) : identityView(text1);
-  const a2 = ignoreNonAlpha ? buildAlphaView(text2) : identityView(text2);
+  setRunning(true);
+  showProgress(0, 'Building letter index for file 1\u2026');
+  await yieldToBrowser();
+
+  // Build views
+  const a1 = ignoreNonAlpha ? await buildAlphaView(text1) : identityView(text1);
+  if (cancelled) { setRunning(false); return; }
+  showProgress(0, 'Building letter index for file 2\u2026');
+  await yieldToBrowser();
+
+  const a2 = ignoreNonAlpha ? await buildAlphaView(text2) : identityView(text2);
+  if (cancelled) { setRunning(false); return; }
 
   const overlap = Math.max(2 * minLen, 100);
   const chunks  = makeChunks(a1.alphaText.length, chunkSize, overlap);
 
-  // UI: progress
-  setRunning(true);
-  showProgress(0, `0 / ${chunks.length} chunks`);
+  showProgress(0, `Building lookup table\u2026`);
+  await yieldToBrowser();
 
   // Pre-build b2j for alpha2 once
-  const b2j = buildB2J(a2.alphaText);
+  const b2j = await buildB2J(a2.alphaText);
+  if (cancelled) { setRunning(false); return; }
+  showProgress(0, `0 / ${chunks.length} chunks`);
 
   // Process chunks
   const rawRegions = [];
@@ -1029,6 +1059,8 @@ function setRunning(running) {
   btn.disabled = running;
   btn.textContent = running ? 'Processing\u2026' : (hasRun ? 'Run again' : 'Find similar strings');
   cancelBtn.classList.toggle('hidden', !running);
+  cancelBtn.textContent = 'Stop';
+  cancelBtn.disabled = false;
   document.getElementById('progress-section').classList.toggle('hidden', !running);
   if (running) {
     cancelled = false;
@@ -1240,6 +1272,11 @@ function download(filename, content, type) {
 
 document.getElementById('btn-cancel').addEventListener('click', () => {
   cancelled = true;
+  const btn = document.getElementById('btn-cancel');
+  btn.textContent = 'Stopping\u2026';
+  btn.disabled = true;
+  document.getElementById('progress-label').textContent =
+    document.getElementById('progress-label').textContent.replace(/\u2014[^]*/, '') + '\u2014 stopping\u2026';
 });
 
 document.getElementById('btn-run').addEventListener('click', () => {
