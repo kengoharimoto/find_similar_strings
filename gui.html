@@ -502,6 +502,8 @@
 <header>
   <h1>find_similar_strings</h1>
   <p class="subtitle">Compose your command line — copy and paste into a terminal.</p>
+  <p class="subtitle" style="margin-top:.35rem">File paths must be typed or pasted manually (use absolute paths or paths relative to the directory where you run the command).</p>
+  <p class="subtitle" style="margin-top:.35rem; color: var(--red)">Note: comparing large files can take a very long time.</p>
 </header>
 
 <div class="layout">
@@ -636,8 +638,8 @@
     </div>
 
     <div class="field">
-      <label>Chunk size <span class="flag">--chunk-size</span> <span class="default">500000</span></label>
-      <input type="number" id="chunk_size" min="1" placeholder="500000">
+      <label>Chunk size <span class="flag">--chunk-size</span> <span class="default">50000</span></label>
+      <input type="number" id="chunk_size" min="1" placeholder="50000">
     </div>
 
     <div class="field">
@@ -772,7 +774,7 @@
     }
 
     const parts = [
-      { cls: "part-script", text: "python find_similar_strings.py" },
+      { cls: "part-script", text: "python3 find_similar_strings.py" },
     ];
 
     // --format (omit when jsonl — it's the default)
@@ -856,7 +858,7 @@
     const fmt = format();
     const file1 = val("file1") || "<file1>";
     const file2 = val("file2") || "<file2>";
-    let cmd = "python find_similar_strings.py";
+    let cmd = "python3 find_similar_strings.py";
 
     if (fmt !== "jsonl") cmd += ` --format ${fmt}`;
 

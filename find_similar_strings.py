@@ -14,6 +14,7 @@ import json
 import os
 import sqlite3
 import sys
+import threading
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Dict, List, Optional, Tuple
@@ -304,19 +305,20 @@ def find_parallel_regions_local(
 
 def process_chunk(args):
     """
-    Worker function for a single chunk of file1 in alpha-index space.
+    Worker function for a chunk of file1 × chunk of file2 in alpha-index space.
 
     Returns a list of region tuples in byte-offset space:
         (byte_start1, byte_end1, byte_start2, byte_end2,
          similarity_filtered, similarity_rf_or_None)
     """
-    alpha_chunk_start, alpha_chunk_end = args
+    alpha_chunk_start1, alpha_chunk_end1, alpha_chunk_start2, alpha_chunk_end2 = args
 
-    slice1 = GLOBAL_ALPHA_TEXT1[alpha_chunk_start:alpha_chunk_end]
+    slice1 = GLOBAL_ALPHA_TEXT1[alpha_chunk_start1:alpha_chunk_end1]
+    slice2 = GLOBAL_ALPHA_TEXT2[alpha_chunk_start2:alpha_chunk_end2]
 
     local_regions = find_parallel_regions_local(
         slice1,
-        GLOBAL_ALPHA_TEXT2,
+        slice2,
         GLOBAL_THRESHOLD,
         GLOBAL_MIN_LEN,
         GLOBAL_MAX_LEN,
@@ -330,13 +332,15 @@ def process_chunk(args):
 
     results = []
     for a_start, a_end, b_start, b_end, sim_filtered in local_regions:
-        alpha_start1 = a_start + alpha_chunk_start
-        alpha_end1 = a_end + alpha_chunk_start
+        alpha_start1 = a_start + alpha_chunk_start1
+        alpha_end1 = a_end + alpha_chunk_start1
+        alpha_start2 = b_start + alpha_chunk_start2
+        alpha_end2 = b_end + alpha_chunk_start2
 
         char_start1 = GLOBAL_ALPHA_TO_CHAR1[alpha_start1]
         char_end1_excl = GLOBAL_ALPHA_TO_CHAR1[alpha_end1 - 1] + 1
-        char_start2 = GLOBAL_ALPHA_TO_CHAR2[b_start]
-        char_end2_excl = GLOBAL_ALPHA_TO_CHAR2[b_end - 1] + 1
+        char_start2 = GLOBAL_ALPHA_TO_CHAR2[alpha_start2]
+        char_end2_excl = GLOBAL_ALPHA_TO_CHAR2[alpha_end2 - 1] + 1
 
         byte_start1 = GLOBAL_CHAR_TO_BYTE1[char_start1]
         byte_end1 = (
@@ -518,9 +522,9 @@ def main():
     )
     parser.add_argument(
         "--chunk-size",
-        type=int, default=500_000,
+        type=int, default=50_000,
         help=(
-            "Chunk size in alphabetic characters for file1 (default: 500000). "
+            "Chunk size in alphabetic characters for file1 (default: 50000). "
             "Larger = fewer chunks but more memory per worker."
         ),
     )
@@ -610,20 +614,25 @@ def main():
     ignore_non_alpha = not args.no_ignore_non_alpha
     t_start = time.monotonic()
 
-    # Read file1 in main process to determine chunk count
+    # Read both files in main process to determine chunk counts
     with open(args.file1, "rb") as f:
         data1_main = f.read()
+    with open(args.file2, "rb") as f:
+        data2_main = f.read()
     text1_main = data1_main.decode("utf-8", errors="replace")
+    text2_main = data2_main.decode("utf-8", errors="replace")
 
     if ignore_non_alpha:
         len_alpha1 = count_alpha(text1_main)
+        len_alpha2 = count_alpha(text2_main)
     else:
         len_alpha1 = len(text1_main)
+        len_alpha2 = len(text2_main)
 
     # Memory estimation warning
     num_workers = args.jobs or os.cpu_count() or 1
     file1_bytes = len(data1_main)
-    file2_bytes = os.path.getsize(args.file2)
+    file2_bytes = len(data2_main)
     est_gb = num_workers * (file1_bytes + file2_bytes) * 5 / (1 << 30)
     if est_gb > 4 and not args.quiet:
         print(
@@ -653,16 +662,24 @@ def main():
             else:  # csv
                 writer = CsvWriter(out_stream)
 
-        if len_alpha1 == 0:
+        if len_alpha1 == 0 or len_alpha2 == 0:
             if not args.quiet:
-                print("Warning: no alphabetic characters found in file1.", file=sys.stderr)
+                empty = "file1" if len_alpha1 == 0 else "file2"
+                print(f"Warning: no alphabetic characters found in {empty}.", file=sys.stderr)
             writer.finalize([])
             return
 
         overlap = args.overlap if args.overlap is not None else max(2 * args.min_len, 100)
-        chunk_ranges = list(make_chunks(len_alpha1, args.chunk_size, overlap))
+        chunk_ranges1 = list(make_chunks(len_alpha1, args.chunk_size, overlap))
+        chunk_ranges2 = list(make_chunks(len_alpha2, args.chunk_size, overlap))
+        chunk_pairs = [
+            (c1[0], c1[1], c2[0], c2[1])
+            for c1 in chunk_ranges1
+            for c2 in chunk_ranges2
+        ]
 
         all_regions = []
+        total_pairs = 0
 
         try:
             with ProcessPoolExecutor(
@@ -675,22 +692,60 @@ def main():
                     ignore_non_alpha, args.fast,
                 ),
             ) as executor:
-                futures = [executor.submit(process_chunk, chunk) for chunk in chunk_ranges]
+                futures = []
+                future_to_chunk = {}
+                for i, chunk in enumerate(chunk_pairs):
+                    fut = executor.submit(process_chunk, chunk)
+                    futures.append(fut)
+                    future_to_chunk[fut] = (i, chunk)
 
                 with tqdm(
                     total=len(futures), desc="Processing chunks",
                     unit="chunk", file=sys.stderr,
                     disable=args.quiet,
                 ) as pbar:
-                    for fut in as_completed(futures):
-                        try:
-                            regions = fut.result()
-                        except Exception as exc:
-                            print(f"Worker error: {exc}", file=sys.stderr)
-                        else:
-                            all_regions.extend(regions)
-                        finally:
-                            pbar.update(1)
+                    stop_tick = threading.Event()
+
+                    def _tick():
+                        while not stop_tick.is_set():
+                            elapsed = time.monotonic() - t_start
+                            pbar.set_postfix(
+                                pairs=total_pairs,
+                                elapsed=f"{elapsed:.0f}s",
+                                refresh=True,
+                            )
+                            stop_tick.wait(1.0)
+
+                    tick_thread = threading.Thread(target=_tick, daemon=True)
+                    tick_thread.start()
+
+                    try:
+                        for fut in as_completed(futures):
+                            chunk_idx, _chunk = future_to_chunk[fut]
+                            try:
+                                regions = fut.result()
+                            except Exception as exc:
+                                tqdm.write(
+                                    f"Worker error (chunk {chunk_idx}): {exc}",
+                                    file=sys.stderr,
+                                )
+                            else:
+                                if regions and not args.quiet:
+                                    for b_start1, b_end1, b_start2, b_end2, sim_filt, _ in regions:
+                                        span_len = max(b_end1 - b_start1, b_end2 - b_start2)
+                                        tqdm.write(
+                                            f"  pair found: sim={sim_filt:.3f}, "
+                                            f"len={fmt_size(span_len)}, "
+                                            f"file1@{b_start1} \u2194 file2@{b_start2}",
+                                            file=sys.stderr,
+                                        )
+                                all_regions.extend(regions)
+                                total_pairs += len(regions)
+                            finally:
+                                pbar.update(1)
+                    finally:
+                        stop_tick.set()
+                        tick_thread.join()
         except KeyboardInterrupt:
             print("\nInterrupted by user.", file=sys.stderr)
             sys.exit(130)
@@ -721,10 +776,6 @@ def main():
         # Apply --max-results truncation
         if args.max_results > 0 and len(sorted_regions) > args.max_results:
             sorted_regions = sorted_regions[:args.max_results]
-
-        # Read file2 for final text extraction (deferred to reduce peak memory)
-        with open(args.file2, "rb") as f:
-            data2_main = f.read()
 
         records = []
         for b_start1, b_end1, b_start2, b_end2, sim_filt, sim_rf in sorted_regions:
