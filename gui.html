@@ -774,7 +774,7 @@
     }
 
     const parts = [
-      { cls: "part-script", text: "python3 find_similar_strings.py" },
+      { cls: "part-script", text: "python3 " + shell(scriptPath()) },
     ];
 
     // --format (omit when jsonl — it's the default)
@@ -825,6 +825,19 @@
       parts.map(p => `<span class="${p.cls}">${escHtml(p.text)}</span>`).join("");
   }
 
+  function scriptPath() {
+    try {
+      const loc = window.location.href;
+      if (!loc.startsWith("file://")) return "find_similar_strings.py";
+      let dir = decodeURIComponent(new URL(loc).pathname.replace(/[^/]+$/, ""));
+      // On Windows, pathname starts with /C:/... — strip leading slash
+      if (/^\/[A-Za-z]:\//.test(dir)) dir = dir.slice(1);
+      return dir + "find_similar_strings.py";
+    } catch (e) {
+      return "find_similar_strings.py";
+    }
+  }
+
   function shell(s) {
     return /[\s$`"'\\;|&<>()]/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s;
   }
@@ -858,7 +871,7 @@
     const fmt = format();
     const file1 = val("file1") || "<file1>";
     const file2 = val("file2") || "<file2>";
-    let cmd = "python3 find_similar_strings.py";
+    let cmd = "python3 " + shell(scriptPath());
 
     if (fmt !== "jsonl") cmd += ` --format ${fmt}`;
 
