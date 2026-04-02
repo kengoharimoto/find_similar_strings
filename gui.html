@@ -495,6 +495,9 @@
   }
 
   .jq-copy:hover { text-decoration: underline; }
+
+  .sub-opts { margin-top: .65rem; }
+  .sub-opts.hidden { display: none; }
 </style>
 </head>
 <body>
@@ -662,6 +665,66 @@
     </div>
   </div>
 
+  <!-- Pre-filtering -->
+  <div class="card">
+    <div class="card-title">Pre-filtering</div>
+
+    <div class="field">
+      <label class="toggle-field" for="use_lsh">
+        <input type="checkbox" id="use_lsh">
+        <span class="toggle-track"></span>
+        <span>
+          <span class="toggle-label">MinHash LSH</span>
+          <span class="toggle-flag">--use-lsh</span>
+          <div class="toggle-desc">Pre-filter chunk pairs by character n-gram Jaccard similarity. Skips dissimilar pairs before SequenceMatcher. Requires <code>pip install datasketch</code>.</div>
+        </span>
+      </label>
+    </div>
+
+    <div id="lsh-opts" class="sub-opts hidden">
+      <div class="field-row">
+        <div class="field">
+          <label>LSH threshold <span class="flag">--lsh-threshold</span> <span class="default">0.3</span></label>
+          <input type="number" id="lsh_threshold" min="0.01" max="1" step="0.01" placeholder="0.3">
+          <div class="hint" id="lsh-threshold-hint"></div>
+        </div>
+        <div class="field">
+          <label>Permutations <span class="flag">--lsh-num-perm</span> <span class="default">128</span></label>
+          <input type="number" id="lsh_num_perm" min="1" placeholder="128">
+        </div>
+      </div>
+      <div class="field">
+        <label>N-gram size <span class="flag">--lsh-ngram-size</span> <span class="default">3</span></label>
+        <input type="number" id="lsh_ngram_size" min="1" placeholder="3">
+      </div>
+    </div>
+
+    <hr>
+
+    <div class="field">
+      <label class="toggle-field" for="use_embeddings">
+        <input type="checkbox" id="use_embeddings">
+        <span class="toggle-track"></span>
+        <span>
+          <span class="toggle-label">Semantic embeddings</span>
+          <span class="toggle-flag">--use-embeddings</span>
+          <div class="toggle-desc">Pre-filter using sentence-transformers + FAISS. Finds semantically similar chunks even with different wording. Requires <code>pip install sentence-transformers faiss-cpu</code>.</div>
+        </span>
+      </label>
+    </div>
+
+    <div id="emb-opts" class="sub-opts hidden">
+      <div class="field">
+        <label>Model <span class="flag">--emb-model</span></label>
+        <input type="text" id="emb_model" placeholder="paraphrase-multilingual-MiniLM-L12-v2">
+      </div>
+      <div class="field">
+        <label>Top K <span class="flag">--emb-top-k</span> <span class="default">10</span></label>
+        <input type="number" id="emb_top_k" min="1" placeholder="10">
+      </div>
+    </div>
+  </div>
+
   <!-- Output options -->
   <div class="card">
     <div class="card-title">Output options</div>
@@ -725,14 +788,21 @@
 </div><!-- /.layout -->
 
 <script>
-  const DEFAULTS = { min_len: 100, max_len: 0, threshold: 0.8, chunk_size: 500000, max_results: 0 };
+  const DEFAULTS = {
+    min_len: 100, max_len: 0, threshold: 0.8, chunk_size: 500000, max_results: 0,
+    lsh_threshold: 0.3, lsh_num_perm: 128, lsh_ngram_size: 3,
+    emb_top_k: 10,
+    emb_model: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  };
 
   const ids = [
     "file1","file2","output",
     "min_len","max_len","threshold",
     "jobs","chunk_size","overlap",
     "use_rapidfuzz","no_ignore_non_alpha",
-    "fast","max_results","quiet"
+    "fast","max_results","quiet",
+    "use_lsh","lsh_threshold","lsh_num_perm","lsh_ngram_size",
+    "use_embeddings","emb_model","emb_top_k",
   ];
 
   ids.forEach(id => {
@@ -810,6 +880,32 @@
     if (checked("no_ignore_non_alpha")) parts.push({ cls: "part-flag", text: " --no-ignore-non-alpha" });
     if (checked("fast"))               parts.push({ cls: "part-flag", text: " --fast" });
 
+    // Pre-filtering
+    document.getElementById("lsh-opts").classList.toggle("hidden", !checked("use_lsh"));
+    document.getElementById("emb-opts").classList.toggle("hidden", !checked("use_embeddings"));
+
+    if (checked("use_lsh")) {
+      parts.push({ cls: "part-flag", text: " --use-lsh" });
+      const lt = val("lsh_threshold");
+      if (lt && parseFloat(lt) !== DEFAULTS.lsh_threshold)
+        parts.push({ cls: "part-flag", text: " --lsh-threshold " }, { cls: "part-value", text: lt });
+      const lp = val("lsh_num_perm");
+      if (lp && parseInt(lp) !== DEFAULTS.lsh_num_perm)
+        parts.push({ cls: "part-flag", text: " --lsh-num-perm " }, { cls: "part-value", text: lp });
+      const ln = val("lsh_ngram_size");
+      if (ln && parseInt(ln) !== DEFAULTS.lsh_ngram_size)
+        parts.push({ cls: "part-flag", text: " --lsh-ngram-size " }, { cls: "part-value", text: ln });
+    }
+    if (checked("use_embeddings")) {
+      parts.push({ cls: "part-flag", text: " --use-embeddings" });
+      const em = val("emb_model");
+      if (em && em !== DEFAULTS.emb_model)
+        parts.push({ cls: "part-flag", text: " --emb-model " }, { cls: "part-value", text: shell(em) });
+      const ek = val("emb_top_k");
+      if (ek && parseInt(ek) !== DEFAULTS.emb_top_k)
+        parts.push({ cls: "part-flag", text: " --emb-top-k " }, { cls: "part-value", text: ek });
+    }
+
     const mr = val("max_results");
     if (mr && parseInt(mr) !== DEFAULTS.max_results)
       parts.push({ cls: "part-flag", text: " --max-results " }, { cls: "part-value", text: mr });
@@ -865,6 +961,17 @@
       mxEl.classList.add("invalid");
     else
       mxEl.classList.remove("invalid");
+
+    const lth = parseFloat(val("lsh_threshold"));
+    const lthHint = document.getElementById("lsh-threshold-hint");
+    const lthEl = document.getElementById("lsh_threshold");
+    if (val("lsh_threshold") && (isNaN(lth) || lth <= 0 || lth > 1)) {
+      lthEl.classList.add("invalid");
+      lthHint.textContent = "Must be between 0 (exclusive) and 1.";
+    } else {
+      lthEl.classList.remove("invalid");
+      lthHint.textContent = "";
+    }
   }
 
   function plainCmd() {
@@ -899,6 +1006,23 @@
     if (checked("use_rapidfuzz"))       cmd += " --use-rapidfuzz";
     if (checked("no_ignore_non_alpha")) cmd += " --no-ignore-non-alpha";
     if (checked("fast"))               cmd += " --fast";
+
+    if (checked("use_lsh")) {
+      cmd += " --use-lsh";
+      const lt = val("lsh_threshold");
+      if (lt && parseFloat(lt) !== DEFAULTS.lsh_threshold) cmd += ` --lsh-threshold ${lt}`;
+      const lp = val("lsh_num_perm");
+      if (lp && parseInt(lp) !== DEFAULTS.lsh_num_perm) cmd += ` --lsh-num-perm ${lp}`;
+      const ln = val("lsh_ngram_size");
+      if (ln && parseInt(ln) !== DEFAULTS.lsh_ngram_size) cmd += ` --lsh-ngram-size ${ln}`;
+    }
+    if (checked("use_embeddings")) {
+      cmd += " --use-embeddings";
+      const em = val("emb_model");
+      if (em && em !== DEFAULTS.emb_model) cmd += ` --emb-model ${shell(em)}`;
+      const ek = val("emb_top_k");
+      if (ek && parseInt(ek) !== DEFAULTS.emb_top_k) cmd += ` --emb-top-k ${ek}`;
+    }
 
     const mr2 = val("max_results");
     if (mr2 && parseInt(mr2) !== DEFAULTS.max_results) cmd += ` --max-results ${mr2}`;

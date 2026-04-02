@@ -21,7 +21,7 @@ from typing import Dict, List, Optional, Tuple
 
 from tqdm import tqdm
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 # ---------------------------------------------------------------------------
 # Per-worker globals (populated by init_worker, read-only in process_chunk)
@@ -390,6 +390,205 @@ def make_chunks(length: int, chunk_size: int, overlap: int):
 
 
 # ---------------------------------------------------------------------------
+# Pre-filtering (LSH and/or embeddings)
+# ---------------------------------------------------------------------------
+
+
+def _extract_alpha_chunks(alpha_text: str, chunk_ranges: List[Tuple[int, int]]) -> List[str]:
+    """Slice alpha_text into per-chunk strings using chunk_ranges."""
+    return [alpha_text[s:e] for s, e in chunk_ranges]
+
+
+def build_lsh_candidates(
+    alpha_chunks1: List[str],
+    alpha_chunks2: List[str],
+    num_perm: int = 128,
+    lsh_threshold: float = 0.3,
+    ngram_size: int = 3,
+    quiet: bool = False,
+) -> set:
+    """Return a set of (i, j) chunk-index pairs that are LSH candidates.
+
+    Builds character n-gram MinHash signatures for every chunk of both files
+    and uses MinHashLSH banding to find pairs whose Jaccard similarity
+    exceeds lsh_threshold. Only those pairs are passed to SequenceMatcher.
+    Requires: pip install datasketch
+    """
+    try:
+        from datasketch import MinHash, MinHashLSH
+    except ImportError:
+        print(
+            "ERROR: --use-lsh requires datasketch.\n"
+            "Install it with:  pip install datasketch",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if not quiet:
+        print(
+            f"LSH: building MinHash signatures "
+            f"({len(alpha_chunks1)} + {len(alpha_chunks2)} chunks, "
+            f"num_perm={num_perm}, ngram={ngram_size}, threshold={lsh_threshold})...",
+            file=sys.stderr,
+        )
+
+    lsh = MinHashLSH(threshold=lsh_threshold, num_perm=num_perm)
+
+    short_j: List[int] = []  # chunks shorter than ngram_size → fallback
+    for j, chunk in enumerate(alpha_chunks2):
+        if len(chunk) < ngram_size:
+            short_j.append(j)
+            continue
+        m = MinHash(num_perm=num_perm)
+        for k in range(len(chunk) - ngram_size + 1):
+            m.update(chunk[k: k + ngram_size].encode("utf-8"))
+        lsh.insert(j, m)
+
+    candidates: set = set()
+    for i, chunk in enumerate(alpha_chunks1):
+        if len(chunk) < ngram_size:
+            # Fallback: pair with every file2 chunk
+            for j in range(len(alpha_chunks2)):
+                candidates.add((i, j))
+            continue
+        m = MinHash(num_perm=num_perm)
+        for k in range(len(chunk) - ngram_size + 1):
+            m.update(chunk[k: k + ngram_size].encode("utf-8"))
+        for j in lsh.query(m):
+            candidates.add((i, j))
+        # Also pair with short file2 chunks (fallback)
+        for j in short_j:
+            candidates.add((i, j))
+
+    if not quiet:
+        total = len(alpha_chunks1) * len(alpha_chunks2)
+        pct = 100.0 * len(candidates) / max(total, 1)
+        print(
+            f"LSH: {len(candidates)} candidate pairs "
+            f"({pct:.1f}% of {total} total).",
+            file=sys.stderr,
+        )
+    return candidates
+
+
+def _embedding_subprocess(args):
+    """
+    Worker executed in an isolated subprocess by build_embedding_candidates.
+
+    Runs entirely in a spawned child process so that PyTorch / FAISS internal
+    threads never exist in the main process, preventing segfaults when
+    ProcessPoolExecutor later spawns its own workers.
+    """
+    alpha_chunks1, alpha_chunks2, model_name, top_k, quiet = args
+
+    import os as _os
+    _os.environ["TOKENIZERS_PARALLELISM"] = "false"
+    _os.environ.setdefault("OMP_NUM_THREADS", "1")
+
+    # Use file-based sharing instead of semaphores to avoid the
+    # resource_tracker "leaked semaphore" warning on macOS.
+    try:
+        import torch
+        torch.multiprocessing.set_sharing_strategy("file_system")
+    except (ImportError, RuntimeError):
+        pass
+
+    from sentence_transformers import SentenceTransformer
+    import faiss
+    import numpy as np
+
+    if not quiet:
+        print(
+            f"Embeddings: loading model '{model_name}' "
+            "(may download on first use)...",
+            file=sys.stderr,
+        )
+    model = SentenceTransformer(model_name)
+
+    if not quiet:
+        print(
+            f"Embeddings: encoding {len(alpha_chunks1)} + {len(alpha_chunks2)} chunks...",
+            file=sys.stderr,
+        )
+    embs1 = model.encode(
+        alpha_chunks1, normalize_embeddings=True,
+        show_progress_bar=not quiet,
+    ).astype(np.float32)
+    embs2 = model.encode(
+        alpha_chunks2, normalize_embeddings=True,
+        show_progress_bar=not quiet,
+    ).astype(np.float32)
+
+    dim = embs2.shape[1]
+    index = faiss.IndexFlatIP(dim)
+    index.add(embs2)
+
+    k = min(top_k, len(alpha_chunks2))
+    D, I = index.search(embs1, k)
+
+    candidates = []
+    for i in range(len(alpha_chunks1)):
+        for rank in range(k):
+            j = int(I[i, rank])
+            if j >= 0:
+                candidates.append((i, j))
+
+    if not quiet:
+        total = len(alpha_chunks1) * len(alpha_chunks2)
+        pct = 100.0 * len(candidates) / max(total, 1)
+        print(
+            f"Embeddings: {len(set(candidates))} candidate pairs "
+            f"({pct:.1f}% of {total} total).",
+            file=sys.stderr,
+        )
+    return candidates
+
+
+def build_embedding_candidates(
+    alpha_chunks1: List[str],
+    alpha_chunks2: List[str],
+    model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    top_k: int = 10,
+    quiet: bool = False,
+) -> set:
+    """Return a set of (i, j) chunk-index pairs via FAISS ANN search.
+
+    Runs the embedding entirely in an isolated spawned subprocess so that
+    PyTorch / FAISS internal threads are fully cleaned up before
+    ProcessPoolExecutor spawns its own workers (avoids macOS segfault).
+    Requires: pip install sentence-transformers faiss-cpu
+    """
+    try:
+        from sentence_transformers import SentenceTransformer  # noqa: F401
+    except ImportError:
+        print(
+            "ERROR: --use-embeddings requires sentence-transformers.\n"
+            "Install it with:  pip install sentence-transformers",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    try:
+        import faiss  # noqa: F401
+    except ImportError:
+        print(
+            "ERROR: --use-embeddings requires faiss-cpu.\n"
+            "Install it with:  pip install faiss-cpu",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    import multiprocessing
+    ctx = multiprocessing.get_context("spawn")
+    with ctx.Pool(1, maxtasksperchild=1) as pool:
+        candidate_list = pool.apply(
+            _embedding_subprocess,
+            ((alpha_chunks1, alpha_chunks2, model_name, top_k, quiet),),
+        )
+    # Pool exits here; subprocess is fully dead before we return
+    return set(candidate_list)
+
+
+# ---------------------------------------------------------------------------
 # Worker initializer
 # ---------------------------------------------------------------------------
 
@@ -561,6 +760,58 @@ def main():
         ),
     )
     parser.add_argument(
+        "--use-lsh",
+        action="store_true",
+        help=(
+            "Pre-filter chunk pairs with MinHash + LSH before running SequenceMatcher. "
+            "Requires: pip install datasketch. "
+            "Greatly reduces work when files share only a few similar regions."
+        ),
+    )
+    parser.add_argument(
+        "--lsh-num-perm",
+        type=int, default=128,
+        help="Number of MinHash permutations (default: 128). Higher = more accurate but slower.",
+    )
+    parser.add_argument(
+        "--lsh-threshold",
+        type=float, default=0.3,
+        help=(
+            "Jaccard similarity threshold for LSH candidate selection (default: 0.3). "
+            "Lower = more candidates (higher recall, more SequenceMatcher work)."
+        ),
+    )
+    parser.add_argument(
+        "--lsh-ngram-size",
+        type=int, default=3,
+        help="Character n-gram size for MinHash shingles (default: 3).",
+    )
+    parser.add_argument(
+        "--use-embeddings",
+        action="store_true",
+        help=(
+            "Pre-filter chunk pairs using sentence-transformers + FAISS ANN search. "
+            "Finds semantically similar chunks regardless of exact wording. "
+            "Requires: pip install sentence-transformers faiss-cpu."
+        ),
+    )
+    parser.add_argument(
+        "--emb-model",
+        default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        help=(
+            "Sentence-transformers model for embedding "
+            "(default: paraphrase-multilingual-MiniLM-L12-v2)."
+        ),
+    )
+    parser.add_argument(
+        "--emb-top-k",
+        type=int, default=10,
+        help=(
+            "Number of nearest file2 chunks to retrieve per file1 chunk via FAISS "
+            "(default: 10)."
+        ),
+    )
+    parser.add_argument(
         "--max-results",
         type=int, default=0,
         help=(
@@ -610,6 +861,37 @@ def main():
                 "--use-rapidfuzz was requested but RapidFuzz is not installed.\n"
                 "Install it with:  pip install rapidfuzz"
             )
+    if args.use_lsh:
+        if not (0.0 < args.lsh_threshold <= 1.0):
+            parser.error("--lsh-threshold must be between 0 (exclusive) and 1 (inclusive).")
+        if args.lsh_num_perm <= 0:
+            parser.error("--lsh-num-perm must be a positive integer.")
+        if args.lsh_ngram_size < 1:
+            parser.error("--lsh-ngram-size must be >= 1.")
+        try:
+            from datasketch import MinHash, MinHashLSH  # noqa: F401
+        except ImportError:
+            parser.error(
+                "--use-lsh requires datasketch.\n"
+                "Install it with:  pip install datasketch"
+            )
+    if args.use_embeddings:
+        if args.emb_top_k < 1:
+            parser.error("--emb-top-k must be >= 1.")
+        try:
+            from sentence_transformers import SentenceTransformer  # noqa: F401
+        except ImportError:
+            parser.error(
+                "--use-embeddings requires sentence-transformers.\n"
+                "Install it with:  pip install sentence-transformers"
+            )
+        try:
+            import faiss  # noqa: F401
+        except ImportError:
+            parser.error(
+                "--use-embeddings requires faiss-cpu.\n"
+                "Install it with:  pip install faiss-cpu"
+            )
 
     ignore_non_alpha = not args.no_ignore_non_alpha
     t_start = time.monotonic()
@@ -622,12 +904,25 @@ def main():
     text1_main = data1_main.decode("utf-8", errors="replace")
     text2_main = data2_main.decode("utf-8", errors="replace")
 
+    need_alpha_views = args.use_lsh or args.use_embeddings
+    alpha_text1_main: Optional[str] = None
+    alpha_text2_main: Optional[str] = None
+
     if ignore_non_alpha:
-        len_alpha1 = count_alpha(text1_main)
-        len_alpha2 = count_alpha(text2_main)
+        if need_alpha_views:
+            alpha_text1_main, _ = build_alpha_view(text1_main)
+            alpha_text2_main, _ = build_alpha_view(text2_main)
+            len_alpha1 = len(alpha_text1_main)
+            len_alpha2 = len(alpha_text2_main)
+        else:
+            len_alpha1 = count_alpha(text1_main)
+            len_alpha2 = count_alpha(text2_main)
     else:
         len_alpha1 = len(text1_main)
         len_alpha2 = len(text2_main)
+        if need_alpha_views:
+            alpha_text1_main = text1_main
+            alpha_text2_main = text2_main
 
     # Memory estimation warning
     num_workers = args.jobs or os.cpu_count() or 1
@@ -672,11 +967,46 @@ def main():
         overlap = args.overlap if args.overlap is not None else max(2 * args.min_len, 100)
         chunk_ranges1 = list(make_chunks(len_alpha1, args.chunk_size, overlap))
         chunk_ranges2 = list(make_chunks(len_alpha2, args.chunk_size, overlap))
-        chunk_pairs = [
-            (c1[0], c1[1], c2[0], c2[1])
-            for c1 in chunk_ranges1
-            for c2 in chunk_ranges2
-        ]
+        if need_alpha_views:
+            alpha_chunks1 = _extract_alpha_chunks(alpha_text1_main, chunk_ranges1)
+            alpha_chunks2 = _extract_alpha_chunks(alpha_text2_main, chunk_ranges2)
+            candidate_indices: Optional[set] = set()
+
+            if args.use_lsh:
+                candidate_indices |= build_lsh_candidates(
+                    alpha_chunks1, alpha_chunks2,
+                    num_perm=args.lsh_num_perm,
+                    lsh_threshold=args.lsh_threshold,
+                    ngram_size=args.lsh_ngram_size,
+                    quiet=args.quiet,
+                )
+            if args.use_embeddings:
+                candidate_indices |= build_embedding_candidates(
+                    alpha_chunks1, alpha_chunks2,
+                    model_name=args.emb_model,
+                    top_k=args.emb_top_k,
+                    quiet=args.quiet,
+                )
+
+            chunk_pairs = [
+                (chunk_ranges1[i][0], chunk_ranges1[i][1],
+                 chunk_ranges2[j][0], chunk_ranges2[j][1])
+                for i, j in sorted(candidate_indices)
+            ]
+            if not args.quiet:
+                total_product = len(chunk_ranges1) * len(chunk_ranges2)
+                pct = 100.0 * len(chunk_pairs) / max(total_product, 1)
+                print(
+                    f"Pre-filter: {len(chunk_pairs)} / {total_product} chunk pairs selected "
+                    f"({pct:.1f}%).",
+                    file=sys.stderr,
+                )
+        else:
+            chunk_pairs = [
+                (c1[0], c1[1], c2[0], c2[1])
+                for c1 in chunk_ranges1
+                for c2 in chunk_ranges2
+            ]
 
         all_regions = []
         total_pairs = 0
